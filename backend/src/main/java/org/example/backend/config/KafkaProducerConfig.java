@@ -38,4 +38,5 @@ public class KafkaProducerConfig {
     public NewTopic responseTopic() {
         return new NewTopic("reclamation-responses", 1, (short) 1);
     }
+
 }
