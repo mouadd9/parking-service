@@ -10,9 +10,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/admin/reclamations")
 public class AdminReclamationController {
-
-    // this will intercept requests for responding to reclamations
-//    @PostMapping("/reply")
+//
+//        @PostMapping("/reply")
 //    public ResponseEntity<String> replyToReclamation(@RequestBody ReclamationResponseDTO request) {
 //        // for future
 //        // we should create a service for this and inject it here ...

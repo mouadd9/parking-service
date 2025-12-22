@@ -24,8 +24,7 @@ public class ParkingSpot {
     @Column(nullable = false, unique = true)
     private String sensorId;   // Lien avec IoT (ex: "SENSOR-XYZ")
 
-//    @Enumerated(EnumType.STRING)
-    private Boolean status; // FREE, OCCUPIED
+    private Boolean status;
 
     @ManyToOne
     @JoinColumn(name = "zone_id")
