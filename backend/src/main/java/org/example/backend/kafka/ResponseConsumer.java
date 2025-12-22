@@ -3,13 +3,15 @@ package org.example.backend.kafka;
 // this file is to consume and store Kafka messages related to reclamation-responses that gonna be sent back to RECLAMATION Group
 // the workflow is: US (producer) --> Kafka Topic "reclamation-responses" --> US (consumer) -> save to DB
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.example.backend.entities.MessageResponse;
 import org.example.backend.repository.MessageResponseRepository;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
+
 
 import java.time.LocalDateTime;
 
@@ -29,9 +31,12 @@ public class ResponseConsumer {
         // System.out.println("DEBUG: Received response message: " + message);
 
         JsonNode root;
-        root = objectMapper.readTree(message);
-
-
+        try {
+            root = objectMapper.readTree(message);
+        } catch (JsonProcessingException e) {
+            System.err.println("Skipping non-JSON message: " + e.getMessage());
+            return;
+        }
         try {
             LocalDateTime ts = LocalDateTime.now();
             if (root.hasNonNull("timestamp")) {
