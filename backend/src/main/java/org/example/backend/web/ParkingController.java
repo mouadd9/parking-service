@@ -7,6 +7,8 @@ import org.example.backend.service.ParkingService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/spots")
 @RequiredArgsConstructor
@@ -55,5 +57,14 @@ public class ParkingController {
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body("Error: " + e.getMessage());
         }
+    }
+
+    // URL : GET http://localhost:8080/api/my-history?userId=user_123
+    @GetMapping("/my-history")
+    public ResponseEntity<List<ParkingSession>> getHistory(@RequestParam String userId) {
+
+        List<ParkingSession> history = parkingService.getUserCompletedHistory(userId);
+
+        return ResponseEntity.ok(history);
     }
 }

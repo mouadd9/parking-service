@@ -20,5 +20,5 @@ public interface ParkingSessionRepository extends JpaRepository<ParkingSession, 
     // 2. Pour afficher la session active en haut de la map
     // this returns the current session for a driver
     Optional<ParkingSession> findByDriverIdAndStatus(String driverId, SessionStatus status);
-
+    List<ParkingSession> findAllByDriverIdAndStatus(String driverId, SessionStatus status);
 }

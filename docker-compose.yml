@@ -6,10 +6,15 @@ services:
       MYSQL_DATABASE: 'parking_db'
       MYSQL_USER: 'parking_user'
       MYSQL_PASSWORD: 'password'
+        # 1. Dire à Spring d'attendre que Hibernate ait fini avant de lancer le SQL
+      SPRING_JPA_DEFER_DATASOURCE_INITIALIZATION: 'true'
+        # 2. Indiquer où se trouve notre fichier SQL monté
+      SPRING_SQL_INIT_DATA_LOCATIONS: 'file:/app/init-data/data.sql'
     ports:
-      - "3307:3306"
+      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      - data.sql:/app/init-data/data.sql
 
   kafka:
     image: confluentinc/cp-kafka:7.8.3

@@ -61,12 +61,13 @@ public class ParkingService {
                 .orElse(null);
     }
 
-    // POUR LE FRONTEND : Historique ---
-    public List<ParkingSession> getUserHistory(String userId) {
-        return sessionRepository.findByDriverId(userId);
+
+    public List<ParkingSession> getUserCompletedHistory(String userId) {
+        // On demande explicitement le statut COMPLETED
+        return sessionRepository.findAllByDriverIdAndStatus(userId, SessionStatus.COMPLETED);
     }
 
-    // --- POUR LE FRONTEND : Bouton "Terminer" ---
+    // "Terminer" ---
     @Transactional
     public void checkOutManual(String userId) {
 
