@@ -24,9 +24,6 @@ public class ParkingSession {
 
     private String driverId; // ID venant de Clerk (User Token)
 
-    // Pour l'affichage historique, on peut garder la plaque si nécessaire
-    private String licensePlate;
-
     @ManyToOne
     @JoinColumn(name = "spot_id")
     private ParkingSpot spot;
@@ -37,5 +34,5 @@ public class ParkingSession {
     private BigDecimal totalCost;
 
     @Enumerated(EnumType.STRING)
-    private SessionStatus status; // ACTIVE, COMPLETED
+    private SessionStatus status;
 }

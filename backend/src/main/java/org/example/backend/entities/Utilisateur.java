@@ -31,6 +31,5 @@ public class Utilisateur {
     private Role role;
 
     @Column(unique = true)
-
     private String clerkId;
 }
