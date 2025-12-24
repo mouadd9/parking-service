@@ -17,6 +17,7 @@ public class ParkingZoneMapper {
                 .latitude(entity.getLatitude())
                 .longitude(entity.getLongitude())
                 .hourlyRate(entity.getHourlyRate())
+                .capacity(entity.getCapacity())
                 .build();
     }
 }

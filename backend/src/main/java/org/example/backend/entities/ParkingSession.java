@@ -33,6 +33,8 @@ public class ParkingSession {
 
     private BigDecimal totalCost;
 
+
+
     @Enumerated(EnumType.STRING)
     private SessionStatus status;
 }

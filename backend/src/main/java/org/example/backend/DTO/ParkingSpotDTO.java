@@ -9,4 +9,5 @@ public class ParkingSpotDTO {
     private Long id;
     private String spotNumber; // Ex: "P-101"
     private Boolean status;    // true = Libre, false = Occupé
+
 }

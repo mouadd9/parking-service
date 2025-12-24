@@ -27,7 +27,7 @@ public class ParkingZone {
     // pour afficher sur la carte
     private Double latitude;
     private Double longitude;
-
+    private Integer capacity;
     @OneToMany(mappedBy = "zone", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @ToString.Exclude // Empêche Lombok de faire une boucle infinie
     @JsonIgnore       // Empêche l'API de renvoyer la liste complète (trop lourd) si on demande juste la zone

@@ -13,6 +13,7 @@ public class ParkingZoneDTO {
     private Double latitude;
     private Double longitude;
     private BigDecimal hourlyRate;
+    private Integer capacity;
     // Note : On ne met PAS la liste des spots ici.
     // La carte n'en a pas besoin pour l'affichage global.
 }
