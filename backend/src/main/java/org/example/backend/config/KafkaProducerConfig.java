@@ -31,7 +31,7 @@ public class KafkaProducerConfig {
     // automatically create topics if not existing
     @Bean
     public NewTopic reclamationsTopic() {
-        return new NewTopic("claims", 1, (short) 1);
+        return new NewTopic("claims.spk", 1, (short) 1);
     }
 
     @Bean
