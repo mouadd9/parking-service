@@ -13,8 +13,8 @@ import java.util.Optional;
 @Repository
 public interface ReservationRepository extends JpaRepository<Reservation, Long> {
 
-    // Trouver les réservations actives pour un spot
-    @Query("SELECT r FROM Reservation r WHERE r.spot.id = :spotId AND r.status IN ('CONFIRMED', 'ACTIVE') " +
+    // Trouver les réservations actives ou en attente pour un spot
+    @Query("SELECT r FROM Reservation r WHERE r.spot.id = :spotId AND r.status IN ('PENDING', 'ACTIVE') " +
             "AND ((r.startTime <= :currentTime AND r.endTime >= :currentTime) OR " +
             "(r.startTime >= :startTime AND r.startTime <= :endTime))")
     List<Reservation> findActiveReservationsForSpot(
@@ -23,10 +23,17 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
             @Param("startTime") LocalDateTime startTime,
             @Param("endTime") LocalDateTime endTime);
 
-    // Trouver les réservations actives pour un spot à un moment donné
-    @Query("SELECT r FROM Reservation r WHERE r.spot.id = :spotId AND r.status = 'CONFIRMED' " +
+    // Trouver les réservations PENDING pour un spot à un moment donné (attente d'entrée physique)
+    @Query("SELECT r FROM Reservation r WHERE r.spot.id = :spotId AND r.status = 'PENDING' " +
             "AND :currentTime BETWEEN r.startTime AND r.endTime")
-    List<Reservation> findConfirmedReservationsForSpotAtTime(
+    List<Reservation> findPendingReservationsForSpotAtTime(
+            @Param("spotId") Long spotId,
+            @Param("currentTime") LocalDateTime currentTime);
+
+    // Trouver les réservations ACTIVE pour un spot (utilisateur déjà entré)
+    @Query("SELECT r FROM Reservation r WHERE r.spot.id = :spotId AND r.status = 'ACTIVE' " +
+            "AND :currentTime BETWEEN r.startTime AND r.endTime")
+    List<Reservation> findActiveReservationsForSpotAtTime(
             @Param("spotId") Long spotId,
             @Param("currentTime") LocalDateTime currentTime);
 
@@ -38,7 +45,7 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
 
     // Vérifier la disponibilité d'un spot pour une période
     @Query("SELECT COUNT(r) > 0 FROM Reservation r WHERE r.spot.id = :spotId " +
-            "AND r.status IN ('CONFIRMED', 'ACTIVE') " +
+            "AND r.status IN ('PENDING', 'ACTIVE') " +
             "AND ((r.startTime <= :endTime AND r.endTime >= :startTime))")
     boolean isSpotReservedForPeriod(
             @Param("spotId") Long spotId,

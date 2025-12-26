@@ -62,42 +62,57 @@ public class ParkingDetectionService {
                     .build();
         }
 
-        // Vérifier s'il y a une réservation active pour ce spot
+        // Vérifier s'il y a une réservation PENDING pour ce spot (utilisateur a réservé mais pas encore entré)
         LocalDateTime detectionTime = LocalDateTime.parse(timestamp);
-        List<Reservation> activeReservations = reservationRepository
-                .findConfirmedReservationsForSpotAtTime(spot.getId(), detectionTime);
+        List<Reservation> pendingReservations = reservationRepository
+                .findPendingReservationsForSpotAtTime(spot.getId(), detectionTime);
 
-        boolean hasReservation = !activeReservations.isEmpty();
-        Reservation reservation = hasReservation ? activeReservations.get(0) : null;
+        boolean hasReservation = !pendingReservations.isEmpty();
+        Reservation reservation = hasReservation ? pendingReservations.get(0) : null;
 
-        // Créer une nouvelle session
-        ParkingSession newSession = ParkingSession.builder()
-                .spot(spot)
-                .driverId(hasReservation ? reservation.getDriverId() : "anonymous")
-                .startTime(detectionTime)
-                .status(SessionStatus.ACTIVE)
-                .build();
+        // IMPORTANT: Ne créer une session QUE si une réservation existe
+        if (!hasReservation) {
+            throw new RuntimeException("Aucune réservation trouvée pour ce spot. L'utilisateur doit d'abord réserver.");
+        }
 
-        sessionRepository.save(newSession);
+        // Trouver la session PENDING existante (créée lors de la réservation)
+        ParkingSession pendingSession = sessionRepository
+                .findBySpotIdAndStatus(spot.getId(), SessionStatus.PENDING)
+                .orElse(null);
+
+        ParkingSession activeSession;
+        if (pendingSession != null) {
+            // Mettre à jour la session PENDING → ACTIVE et démarrer le timer
+            pendingSession.setStartTime(detectionTime);  // LE TIMER COMMENCE ICI!
+            pendingSession.setStatus(SessionStatus.ACTIVE);
+            activeSession = sessionRepository.save(pendingSession);
+        } else {
+            // Fallback: créer une nouvelle session si PENDING n'existe pas
+            activeSession = ParkingSession.builder()
+                    .spot(spot)
+                    .driverId(reservation.getDriverId())
+                    .startTime(detectionTime)
+                    .status(SessionStatus.ACTIVE)
+                    .build();
+            activeSession = sessionRepository.save(activeSession);
+        }
 
         // Mettre à jour le statut du spot
         spot.setStatus(false); // false = occupé
         spotRepository.save(spot);
 
-        // Si une réservation existe, la mettre à jour
-        if (hasReservation && reservation != null) {
-            reservation.setStatus("ACTIVE");
-            reservationRepository.save(reservation);
-        }
+        // Mettre à jour la réservation de PENDING → ACTIVE
+        reservation.setStatus("ACTIVE");
+        reservationRepository.save(reservation);
 
         return ParkingDetectionResponse.builder()
                 .action("entry_detected")
                 .spotId(spot.getId())
                 .spotNumber(spot.getSpotNumber())
                 .zoneName(spot.getZone().getName())
-                .sessionId(newSession.getId())
-                .hasReservation(hasReservation)
-                .reservation(hasReservation ? reservation : null)
+                .sessionId(activeSession.getId())
+                .hasReservation(true)
+                .reservation(reservation)
                 .build();
     }
 
@@ -133,7 +148,7 @@ public class ParkingDetectionService {
 
         // Si une réservation était active, la terminer
         List<Reservation> activeReservations = reservationRepository
-                .findConfirmedReservationsForSpotAtTime(spot.getId(), exitTime);
+                .findActiveReservationsForSpotAtTime(spot.getId(), exitTime);
 
         if (!activeReservations.isEmpty()) {
             Reservation reservation = activeReservations.get(0);
