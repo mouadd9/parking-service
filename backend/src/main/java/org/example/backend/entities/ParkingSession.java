@@ -31,7 +31,8 @@ public class ParkingSession {
     private LocalDateTime startTime;
     private LocalDateTime endTime;
 
-    private BigDecimal totalCost;
+    @Column(nullable = false)
+    private BigDecimal totalCost = BigDecimal.ZERO;
 
 
 

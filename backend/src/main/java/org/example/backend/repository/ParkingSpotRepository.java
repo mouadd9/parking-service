@@ -15,7 +15,10 @@ public interface ParkingSpotRepository extends JpaRepository<ParkingSpot, Long> 
     long countBySensorIdIsNotNull();
     Optional<ParkingSpot> findBySensorId(String sensorId);
 
-    // Trouver les spots par zoneId
+
+    // Compter les spots par zone et statut
+    @Query("SELECT COUNT(p) FROM ParkingSpot p WHERE p.zone.id = :zoneId AND p.status = :status")
+    long countByZoneIdAndStatus(@Param("zoneId") Long zoneId, @Param("status") Boolean status);
 
 
     // Trouver les spots disponibles dans une zone
@@ -25,4 +28,6 @@ public interface ParkingSpotRepository extends JpaRepository<ParkingSpot, Long> 
     // Compter les spots disponibles dans une zone
     @Query("SELECT COUNT(ps) FROM ParkingSpot ps WHERE ps.zone.id = :zoneId AND ps.status = true")
     long countAvailableSpotsByZoneId(@Param("zoneId") Long zoneId);
+
+    long countByStatus(Boolean status);
 }

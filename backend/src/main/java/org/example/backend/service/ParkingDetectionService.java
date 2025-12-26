@@ -14,12 +14,14 @@ import org.example.backend.repository.ParkingSpotRepository;
 import org.example.backend.repository.ReservationRepository;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
-import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -29,6 +31,19 @@ public class ParkingDetectionService {
     private final ParkingSpotRepository spotRepository;
     private final ParkingSessionRepository sessionRepository;
     private final ReservationRepository reservationRepository;
+    private final ZoneRateService zoneRateService;
+
+    // Configuration tarifaire
+    private static final BigDecimal DEFAULT_HOURLY_RATE = new BigDecimal("10.00");
+    private static final BigDecimal MINIMUM_PARKING_FEE = new BigDecimal("5.00");
+    private static final BigDecimal NIGHT_RATE_MULTIPLIER = new BigDecimal("0.7");
+    private static final BigDecimal WEEKEND_RATE_MULTIPLIER = new BigDecimal("1.2");
+    private static final int NIGHT_START_HOUR = 20;
+    private static final int NIGHT_END_HOUR = 8;
+
+    // Constantes pour la clarté du code
+    private static final boolean SPOT_FREE = false;      // 0 dans la base = LIBRE
+    private static final boolean SPOT_OCCUPIED = true;   // 1 dans la base = OCCUPÉ
 
     @Transactional
     public ParkingDetectionResponse handleDetection(ParkingDetectionRequest request) {
@@ -37,44 +52,21 @@ public class ParkingDetectionService {
                 request.getSensorId(), request.getStatus(), request.getTimestamp());
 
         try {
-            // Vérifier si le capteur existe
-            List<ParkingSpot> allSpots = spotRepository.findAll();
-            log.info("Total spots dans la base: {}", allSpots.size());
-
-            // Log tous les capteurs
-            allSpots.forEach(spot -> {
-                if (spot.getSensorId() != null) {
-                    log.debug("Capteur: {} -> Spot {}", spot.getSensorId(), spot.getSpotNumber());
-                }
-            });
-
             ParkingSpot spot = spotRepository.findBySensorId(request.getSensorId())
-                    .orElse(null);
+                    .orElseThrow(() -> new RuntimeException("Capteur non trouvé: " + request.getSensorId()));
 
-            if (spot == null) {
-                log.error("❌ Capteur non trouvé: {}", request.getSensorId());
-                return ParkingDetectionResponse.builder()
-                        .action("error")
-                        .message("Capteur non trouvé: " + request.getSensorId())
-                        .build();
-            }
-
-            log.info("✅ Spot trouvé: ID={}, Numéro={}, Zone={}",
+            log.info("✅ Spot trouvé: ID={}, Numéro={}, Zone={}, Statut actuel={}",
                     spot.getId(), spot.getSpotNumber(),
-                    spot.getZone() != null ? spot.getZone().getName() : "N/A");
+                    spot.getZone() != null ? spot.getZone().getName() : "N/A",
+                    spot.getStatus() ? "OCCUPÉ" : "LIBRE");
 
-            // Traiter selon le status
             if ("occupied".equalsIgnoreCase(request.getStatus())) {
                 return handleCarEntry(spot, request.getTimestamp());
             } else if ("free".equalsIgnoreCase(request.getStatus())) {
                 return handleCarExit(spot, request.getTimestamp());
-            } else {
-                log.error("Statut invalide: {}", request.getStatus());
-                return ParkingDetectionResponse.builder()
-                        .action("error")
-                        .message("Statut invalide: " + request.getStatus())
-                        .build();
             }
+
+            throw new IllegalArgumentException("Statut invalide: " + request.getStatus());
 
         } catch (Exception e) {
             log.error("❌ Erreur dans handleDetection: ", e);
@@ -87,15 +79,15 @@ public class ParkingDetectionService {
 
     private LocalDateTime parseTimestamp(String timestamp) {
         try {
-            // Essayer différents formats
             if (timestamp.contains("T") && timestamp.contains(".")) {
-                return LocalDateTime.parse(timestamp,
-                        DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+                return LocalDateTime.parse(timestamp, DateTimeFormatter.ISO_OFFSET_DATE_TIME);
             } else if (timestamp.contains("T")) {
                 return LocalDateTime.parse(timestamp);
             } else {
-                // Format simple
-                return LocalDateTime.parse(timestamp + "T00:00:00");
+                String datePart = timestamp.split(" ")[0];
+                LocalDateTime now = LocalDateTime.now();
+                return LocalDateTime.parse(datePart + "T" +
+                        String.format("%02d:%02d:%02d", now.getHour(), now.getMinute(), now.getSecond()));
             }
         } catch (DateTimeParseException e) {
             log.warn("Format de timestamp non reconnu: {}, utilisation de l'heure actuelle", timestamp);
@@ -107,75 +99,69 @@ public class ParkingDetectionService {
         try {
             log.info("🚗 ENTREE détectée pour le spot {}", spot.getSpotNumber());
 
-            // Vérifier s'il y a déjà une session active
-            ParkingSession existingSession = sessionRepository
-                    .findBySpotIdAndStatus(spot.getId(), SessionStatus.ACTIVE)
-                    .orElse(null);
+            // Vérifier le statut actuel du spot
+            if (spot.getStatus() == SPOT_OCCUPIED) {
+                log.warn("⚠️ Spot {} déjà occupé - vérification des sessions", spot.getSpotNumber());
 
-            if (existingSession != null) {
-                log.info("Spot déjà occupé, session existante: {}", existingSession.getId());
-                return ParkingDetectionResponse.builder()
-                        .action("entry_detected")
-                        .spotId(spot.getId())
-                        .spotNumber(spot.getSpotNumber())
-                        .zoneName(spot.getZone() != null ? spot.getZone().getName() : "N/A")
-                        .sessionId(existingSession.getId())
-                        .hasReservation(false)
-                        .message("Spot déjà occupé")
-                        .build();
+                // Vérifier s'il y a une session active
+                Optional<ParkingSession> activeSessionOpt = sessionRepository
+                        .findBySpotIdAndStatus(spot.getId(), SessionStatus.ACTIVE);
+
+                if (activeSessionOpt.isPresent()) {
+                    ParkingSession existingSession = activeSessionOpt.get();
+                    log.info("✅ Session active trouvée: {}", existingSession.getId());
+                    return buildEntryResponse(spot, existingSession, false, "Spot déjà occupé (session existante)");
+                } else {
+                    // Spot marqué occupé mais pas de session → corriger l'incohérence
+                    log.info("🔧 Correction: Spot marqué occupé mais pas de session → mise à jour du statut");
+                    spot.setStatus(SPOT_FREE);
+                    spotRepository.save(spot);
+                }
             }
 
-            // Parser le timestamp
+            Optional<ParkingSession> activeSessionOpt = sessionRepository
+                    .findBySpotIdAndStatus(spot.getId(), SessionStatus.ACTIVE);
+
+            if (activeSessionOpt.isPresent()) {
+                ParkingSession existingSession = activeSessionOpt.get();
+                log.info("Session active déjà présente: {}", existingSession.getId());
+                return buildEntryResponse(spot, existingSession, false, "Session déjà active");
+            }
+
             LocalDateTime detectionTime = parseTimestamp(timestamp);
 
-            // Vérifier les réservations
             List<Reservation> activeReservations = reservationRepository
                     .findConfirmedReservationsForSpotAtTime(spot.getId(), detectionTime);
 
             boolean hasReservation = !activeReservations.isEmpty();
             Reservation reservation = hasReservation ? activeReservations.get(0) : null;
 
-            // Créer nouvelle session
             ParkingSession newSession = ParkingSession.builder()
                     .spot(spot)
                     .driverId(hasReservation && reservation != null ? reservation.getDriverId() : "anonymous")
                     .startTime(detectionTime)
                     .status(SessionStatus.ACTIVE)
+                    .totalCost(BigDecimal.ZERO)
                     .build();
 
             sessionRepository.save(newSession);
-            log.info("✅ Nouvelle session créée: ID={}", newSession.getId());
 
-            // Mettre à jour le spot
-            spot.setStatus(false); // Occupé
+            // Marquer le spot comme OCCUPÉ (true = 1)
+            spot.setStatus(SPOT_OCCUPIED);
             spotRepository.save(spot);
 
-            // Mettre à jour la réservation si elle existe
             if (hasReservation && reservation != null) {
                 reservation.setStatus("ACTIVE");
                 reservationRepository.save(reservation);
                 log.info("Réservation {} activée", reservation.getId());
             }
 
-            return ParkingDetectionResponse.builder()
-                    .action("entry_detected")
-                    .spotId(spot.getId())
-                    .spotNumber(spot.getSpotNumber())
-                    .zoneName(spot.getZone() != null ? spot.getZone().getName() : "N/A")
-                    .sessionId(newSession.getId())
-                    .hasReservation(hasReservation)
-                    .reservation(hasReservation ? reservation : null)
-                    .message("Entrée enregistrée avec succès")
-                    .build();
+            log.info("✅ Nouvelle session créée: ID={}, Spot maintenant OCCUPÉ", newSession.getId());
+            return buildEntryResponse(spot, newSession, hasReservation, "Entrée enregistrée avec succès");
 
         } catch (Exception e) {
             log.error("❌ Erreur dans handleCarEntry: ", e);
-            return ParkingDetectionResponse.builder()
-                    .action("error")
-                    .spotId(spot.getId())
-                    .spotNumber(spot.getSpotNumber())
-                    .message("Erreur lors de l'entrée: " + e.getMessage())
-                    .build();
+            return buildErrorResponse(spot, "Erreur lors de l'entrée: " + e.getMessage());
         }
     }
 
@@ -183,78 +169,257 @@ public class ParkingDetectionService {
         try {
             log.info("🚪 SORTIE détectée pour le spot {}", spot.getSpotNumber());
 
-            // Trouver session active
-            ParkingSession activeSession = sessionRepository
-                    .findBySpotIdAndStatus(spot.getId(), SessionStatus.ACTIVE)
-                    .orElse(null);
+            Optional<ParkingSession> activeSessionOpt = sessionRepository
+                    .findBySpotIdAndStatus(spot.getId(), SessionStatus.ACTIVE);
 
-            if (activeSession == null) {
-                log.warn("Aucune session active pour le spot {}, création d'une session factice", spot.getSpotNumber());
+            // Gestion des cas où il n'y a pas de session active
+            if (activeSessionOpt.isEmpty()) {
+                // Vérifier si le spot est marqué comme occupé
+                if (spot.getStatus() == SPOT_OCCUPIED) {
+                    log.warn("⚠️ Spot {} marqué occupé mais pas de session active - correction du statut",
+                            spot.getSpotNumber());
 
-                // Créer une session factice pour éviter l'erreur
-                ParkingSession fakeSession = ParkingSession.builder()
-                        .spot(spot)
-                        .driverId("unknown")
-                        .startTime(LocalDateTime.now().minusHours(1))
-                        .status(SessionStatus.ACTIVE)
+                    // Corriger le statut du spot
+                    spot.setStatus(SPOT_FREE);
+                    spotRepository.save(spot);
+
+                    return ParkingDetectionResponse.builder()
+                            .action("exit_corrected")
+                            .spotId(spot.getId())
+                            .spotNumber(spot.getSpotNumber())
+                            .zoneName(spot.getZone() != null ? spot.getZone().getName() : "N/A")
+                            .message("⚠️ Statut corrigé: Spot marqué libre (pas de session active)")
+                            .build();
+                }
+
+                log.warn("⚠️ Aucune session active pour le spot {} déjà libre - Sortie ignorée", spot.getSpotNumber());
+                return ParkingDetectionResponse.builder()
+                        .action("exit_ignored")
+                        .spotId(spot.getId())
+                        .spotNumber(spot.getSpotNumber())
+                        .zoneName(spot.getZone() != null ? spot.getZone().getName() : "N/A")
+                        .message("⚠️ Aucune session active - Sortie ignorée")
                         .build();
-
-                activeSession = fakeSession;
             }
 
+            ParkingSession activeSession = activeSessionOpt.get();
             LocalDateTime exitTime = parseTimestamp(timestamp);
 
-            // Calculer durée
-            Duration duration = Duration.between(activeSession.getStartTime(), exitTime);
-            double hours = Math.max(duration.toMinutes() / 60.0, 0.05);
-
-            // Calculer coût
-            BigDecimal hourlyRate = BigDecimal.valueOf(5.0); // Taux par défaut
-            if (spot.getZone() != null && spot.getZone().getHourlyRate() != null) {
-                hourlyRate = spot.getZone().getHourlyRate();
+            // Protection contre les timestamps incohérents
+            if (exitTime.isBefore(activeSession.getStartTime())) {
+                log.error("❌ Heure de sortie {} antérieure à l'entrée {}",
+                        exitTime, activeSession.getStartTime());
+                exitTime = LocalDateTime.now();
             }
 
-            BigDecimal totalCost = hourlyRate.multiply(BigDecimal.valueOf(hours));
+            ParkingFeeCalculation feeCalculation = calculateParkingFee(activeSession, exitTime, spot);
 
-            // Mettre à jour session
-            if (activeSession.getId() != null) {
-                activeSession.setEndTime(exitTime);
-                activeSession.setTotalCost(totalCost);
-                activeSession.setStatus(SessionStatus.COMPLETED);
-                sessionRepository.save(activeSession);
-                log.info("✅ Session {} terminée", activeSession.getId());
-            }
+            // Mise à jour session
+            activeSession.setEndTime(exitTime);
+            activeSession.setTotalCost(feeCalculation.getTotalCost());
+            activeSession.setStatus(SessionStatus.COMPLETED);
+            sessionRepository.save(activeSession);
 
-            // Libérer le spot
-            spot.setStatus(true); // Libre
+            // IMPORTANT: Marquer le spot comme LIBRE (false = 0)
+            spot.setStatus(SPOT_FREE);
             spotRepository.save(spot);
 
-            // Vérifier si c'était une réservation
-            boolean hadReservation = false;
-            if (activeSession.getDriverId() != null && !activeSession.getDriverId().equals("anonymous")) {
-                hadReservation = true;
-            }
+            boolean hadReservation = activeSession.getDriverId() != null &&
+                    !activeSession.getDriverId().equals("anonymous");
 
-            return ParkingDetectionResponse.builder()
-                    .action("exit_detected")
-                    .spotId(spot.getId())
-                    .spotNumber(spot.getSpotNumber())
-                    .zoneName(spot.getZone() != null ? spot.getZone().getName() : "N/A")
-                    .sessionId(activeSession.getId())
-                    .duration(String.format("%.2f heures", hours))
-                    .totalCost(totalCost.doubleValue())
-                    .hasReservation(hadReservation)
-                    .message("Sortie enregistrée avec succès")
-                    .build();
+            log.info("✅ Session {} terminée - Coût: {}€, Durée: {} minutes, Spot maintenant LIBRE",
+                    activeSession.getId(), feeCalculation.getTotalCost(), feeCalculation.getDurationMinutes());
+
+            return buildExitResponse(spot, activeSession, feeCalculation, hadReservation,
+                    "✅ Sortie enregistrée avec succès - Spot libéré");
 
         } catch (Exception e) {
             log.error("❌ Erreur dans handleCarExit: ", e);
-            return ParkingDetectionResponse.builder()
-                    .action("error")
-                    .spotId(spot.getId())
-                    .spotNumber(spot.getSpotNumber())
-                    .message("Erreur lors de la sortie: " + e.getMessage())
-                    .build();
+            return buildErrorResponse(spot, "Erreur lors de la sortie: " + e.getMessage());
+        }
+    }
+
+    private ParkingFeeCalculation calculateParkingFee(ParkingSession session,
+                                                      LocalDateTime exitTime,
+                                                      ParkingSpot spot) {
+        LocalDateTime startTime = session.getStartTime();
+        Duration duration = Duration.between(startTime, exitTime);
+        long minutes = Math.max(1, duration.toMinutes());
+
+        BigDecimal hourlyRate = calculateDynamicRate(spot, startTime);
+
+        // Facturation par heure entamée (arrondi supérieur)
+        double hours = Math.ceil(minutes / 60.0);
+        BigDecimal totalCost = hourlyRate.multiply(BigDecimal.valueOf(hours));
+
+        // Application du minimum obligatoire
+        if (totalCost.compareTo(MINIMUM_PARKING_FEE) < 0) {
+            totalCost = MINIMUM_PARKING_FEE;
+        }
+
+        totalCost = totalCost.setScale(2, RoundingMode.HALF_UP);
+
+        log.info("💰 Calcul tarifaire - Durée: {}min ({}h), Taux: {}€/h → Total: {}€",
+                minutes, String.format("%.2f", hours), hourlyRate, totalCost);
+
+        return new ParkingFeeCalculation(minutes, hourlyRate, totalCost);
+    }
+
+    private BigDecimal calculateDynamicRate(ParkingSpot spot, LocalDateTime timestamp) {
+        BigDecimal baseRate = getBaseRate(spot);
+        BigDecimal adjustedRate = baseRate;
+
+        if (isNightTime(timestamp)) {
+            adjustedRate = adjustedRate.multiply(NIGHT_RATE_MULTIPLIER);
+            log.debug("Ajustement nuit (-30%): {} -> {}", baseRate, adjustedRate);
+        }
+
+        if (isWeekend(timestamp)) {
+            adjustedRate = adjustedRate.multiply(WEEKEND_RATE_MULTIPLIER);
+            log.debug("Ajustement weekend (+20%): {} -> {}", baseRate, adjustedRate);
+        }
+
+        return adjustedRate.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal getBaseRate(ParkingSpot spot) {
+        // Priorité 1: Taux du spot
+        if (spot.getHourlyRate() != null && spot.getHourlyRate().compareTo(BigDecimal.ZERO) > 0) {
+            log.debug("Utilisation du taux du spot: {}", spot.getHourlyRate());
+            return spot.getHourlyRate();
+        }
+
+        // Priorité 2: Taux de la zone
+        if (spot.getZone() != null) {
+            try {
+                var zoneRate = zoneRateService.getZoneRateById(spot.getZone().getId());
+                if (zoneRate != null && zoneRate.getCurrentRate() != null) {
+                    log.debug("Utilisation du taux de la zone {}: {}",
+                            spot.getZone().getName(), zoneRate.getCurrentRate());
+                    return zoneRate.getCurrentRate();
+                }
+            } catch (Exception e) {
+                log.warn("Erreur lors de la récupération du taux de zone: {}", e.getMessage());
+            }
+        }
+
+        // Priorité 3: Taux par défaut
+        log.debug("Utilisation du taux par défaut: {}", DEFAULT_HOURLY_RATE);
+        return DEFAULT_HOURLY_RATE;
+    }
+
+    private boolean isNightTime(LocalDateTime time) {
+        int hour = time.getHour();
+        return hour >= NIGHT_START_HOUR || hour < NIGHT_END_HOUR;
+    }
+
+    private boolean isWeekend(LocalDateTime time) {
+        return time.getDayOfWeek().getValue() >= 6;
+    }
+
+    // ==========================
+    // ✅ RESPONSE BUILDERS
+    // ==========================
+    private ParkingDetectionResponse buildEntryResponse(ParkingSpot spot, ParkingSession session,
+                                                        boolean hasReservation, String message) {
+        return ParkingDetectionResponse.builder()
+                .action("entry_detected")
+                .spotId(spot.getId())
+                .spotNumber(spot.getSpotNumber())
+                .zoneName(spot.getZone() != null ? spot.getZone().getName() : "N/A")
+                .sessionId(session.getId())
+                .startTime(session.getStartTime())
+                .hasReservation(hasReservation)
+                .spotStatus(spot.getStatus() ? "OCCUPIED" : "FREE") // ✅ CORRIGÉ
+                .message(message)
+                .build();
+    }
+
+    private ParkingDetectionResponse buildExitResponse(ParkingSpot spot, ParkingSession session,
+                                                       ParkingFeeCalculation feeCalculation,
+                                                       boolean hadReservation, String message) {
+        return ParkingDetectionResponse.builder()
+                .action("exit_detected")
+                .spotId(spot.getId())
+                .spotNumber(spot.getSpotNumber())
+                .zoneName(spot.getZone() != null ? spot.getZone().getName() : "N/A")
+                .sessionId(session.getId())
+                .startTime(session.getStartTime())
+                .endTime(session.getEndTime())
+                .duration(String.format("%d minutes", feeCalculation.getDurationMinutes()))
+                .hourlyRate(feeCalculation.getHourlyRate().doubleValue())
+                .totalCost(feeCalculation.getTotalCost().doubleValue())
+                .hasReservation(hadReservation)
+                .spotStatus(spot.getStatus() ? "OCCUPIED" : "FREE") // ✅ CORRIGÉ
+                .message(message)
+                .build();
+    }
+
+    private ParkingDetectionResponse buildErrorResponse(ParkingSpot spot, String errorMessage) {
+        return ParkingDetectionResponse.builder()
+                .action("error")
+                .spotId(spot != null ? spot.getId() : null)
+                .spotNumber(spot != null ? spot.getSpotNumber() : null)
+                .message(errorMessage)
+                .build();
+    }
+
+    // ==========================
+    // ✅ INNER CLASS
+    // ==========================
+    private static class ParkingFeeCalculation {
+        private final long durationMinutes;
+        private final BigDecimal hourlyRate;
+        private final BigDecimal totalCost;
+
+        public ParkingFeeCalculation(long durationMinutes, BigDecimal hourlyRate, BigDecimal totalCost) {
+            this.durationMinutes = durationMinutes;
+            this.hourlyRate = hourlyRate;
+            this.totalCost = totalCost;
+        }
+
+        public long getDurationMinutes() {
+            return durationMinutes;
+        }
+
+        public BigDecimal getHourlyRate() {
+            return hourlyRate;
+        }
+
+        public BigDecimal getTotalCost() {
+            return totalCost;
+        }
+    }
+
+    public void checkSpotConsistency() {
+        List<ParkingSpot> allSpots = spotRepository.findAll();
+        int inconsistencies = 0;
+
+        for (ParkingSpot spot : allSpots) {
+            // Vérifier si le statut du spot correspond à une session active
+            boolean hasActiveSession = sessionRepository
+                    .findBySpotIdAndStatus(spot.getId(), SessionStatus.ACTIVE)
+                    .isPresent();
+
+            boolean shouldBeOccupied = hasActiveSession;
+            boolean isOccupied = spot.getStatus() == SPOT_OCCUPIED;
+
+            if (shouldBeOccupied != isOccupied) {
+                log.warn("⚠️ Incohérence sur spot {}: Statut DB={}, Session active={}",
+                        spot.getSpotNumber(), isOccupied ? "OCCUPÉ" : "LIBRE", hasActiveSession);
+                inconsistencies++;
+
+                // Corriger automatiquement
+                spot.setStatus(shouldBeOccupied ? SPOT_OCCUPIED : SPOT_FREE);
+                spotRepository.save(spot);
+                log.info("✅ Correction appliquée pour spot {}", spot.getSpotNumber());
+            }
+        }
+
+        if (inconsistencies > 0) {
+            log.info("🔧 {} incohérences corrigées", inconsistencies);
+        } else {
+            log.info("✅ Tous les spots sont cohérents");
         }
     }
 }
