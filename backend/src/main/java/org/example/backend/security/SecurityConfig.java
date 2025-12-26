@@ -26,6 +26,7 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/ws/**").permitAll() // 🔥 WebSocket endpoint
                         .requestMatchers("/**").permitAll() // Tout est public pour le développement
                         .anyRequest().permitAll()
                 );
@@ -36,9 +37,27 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("*"));
+
+        // 🔥 FIX: Spécifier les origines au lieu de "*" 🔥
+        configuration.setAllowedOrigins(Arrays.asList(
+                "http://localhost:3000",
+                "http://localhost:5173",
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:5173"
+        ));
+
+        // 🔥 IMPORTANT: Autoriser les credentials pour WebSocket 🔥
+        configuration.setAllowCredentials(true);
+
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("*"));
+
+        // 🔥 Headers exposés pour WebSocket 🔥
+        configuration.setExposedHeaders(Arrays.asList(
+                "Authorization",
+                "Access-Control-Allow-Origin",
+                "Access-Control-Allow-Credentials"
+        ));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

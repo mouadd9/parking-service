@@ -79,6 +79,23 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+
+        <!-- ✅ MESSAGING: Spring Messaging (inclus automatiquement avec WebSocket) -->
+        <!-- Mais on peut l'ajouter explicitement pour être sûr -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-messaging</artifactId>
+        </dependency>
+
+        <!-- ✅ WEBSOCKET API: Java WebSocket API (optionnel, mais recommandé) -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-websocket</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>com.mysql</groupId>

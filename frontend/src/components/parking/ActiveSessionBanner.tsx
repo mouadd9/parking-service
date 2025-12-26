@@ -1,125 +1,149 @@
-import { useState, useEffect } from 'react';
-import { ParkingSession } from '@/types/parking';
-import { Button } from '@/components/ui/button';
-import { Clock, MapPin, StopCircle, Car, Loader2 } from 'lucide-react';
+// ============================================================================
+// 1. MODIFIER ActiveSessionBanner.tsx - Retirer le bouton Stop
+// ============================================================================
+// components/parking/ActiveSessionBanner.tsx
+
+import { useEffect, useState } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Clock, MapPin } from "lucide-react";
+import { ParkingSession } from "@/types/parking";
 
 interface ActiveSessionBannerProps {
   session: ParkingSession;
-  onStopSession: () => void;
-  isStoppingSession: boolean;
   hourlyRate: number;
 }
 
-const formatDuration = (startTime: Date): { text: string; hours: number } => {
-  const now = new Date();
-  const diffMs = now.getTime() - startTime.getTime();
-  const hours = diffMs / 3600000;
-  const fullHours = Math.floor(hours);
-  const minutes = Math.floor((diffMs % 3600000) / 60000);
-  const seconds = Math.floor((diffMs % 60000) / 1000);
-  
-  return {
-    text: fullHours > 0 ? `${fullHours}h ${minutes}m ${seconds}s` : `${minutes}m ${seconds}s`,
-    hours: Math.max(hours, 1),
-  };
-};
-
-const ActiveSessionBanner = ({ session, onStopSession, isStoppingSession, hourlyRate }: ActiveSessionBannerProps) => {
-  const [duration, setDuration] = useState(
-    session.startTime ? formatDuration(session.startTime) : { text: '0m 0s', hours: 0 }
-  );
+export default function ActiveSessionBanner({
+  session,
+  hourlyRate,
+}: ActiveSessionBannerProps) {
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [currentCost, setCurrentCost] = useState(0);
 
   useEffect(() => {
-    // Only run timer if session is active (has startTime)
-    if (!session.startTime || session.status !== 'active') return;
+    if (session.status === "reserved" || !session.startTime) {
+      // Session réservée mais pas encore commencée
+      setElapsedTime(0);
+      setCurrentCost(0);
+      return;
+    }
 
+    // Timer pour mettre à jour le temps écoulé chaque seconde
     const interval = setInterval(() => {
-      setDuration(formatDuration(session.startTime!));
+      const now = new Date().getTime();
+      const start = new Date(session.startTime!).getTime();
+      const elapsed = Math.floor((now - start) / 1000); // en secondes
+      
+      setElapsedTime(elapsed);
+      
+      // Calculer le coût en temps réel
+      const hours = elapsed / 3600;
+      const cost = hours * hourlyRate;
+      setCurrentCost(Math.max(cost, hourlyRate)); // Minimum = 1 heure
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [session.startTime, session.status]);
+  }, [session.startTime, session.status, hourlyRate]);
 
-  const currentCost = (duration.hours * hourlyRate).toFixed(2);
+  const formatTime = (seconds: number) => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    return `${hrs.toString().padStart(2, "0")}:${mins
+      .toString()
+      .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
 
-  // Reserved state - waiting for entry detection
-  if (session.status === 'reserved') {
-    return (
-      <div className="bg-card border border-border rounded-lg p-4">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-500 text-white">
-              <Car className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">{session.zoneName}</p>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span>Spot {session.spotNumber}</span>
-              </div>
-              {/* 
-                SENSOR INTEGRATION NOTE:
-                This message is shown while waiting for the sensor to detect the vehicle.
-                Once detected, session.status changes to 'active' and timer starts.
-              */}
-              <div className="flex items-center gap-1.5 text-xs text-amber-600 font-medium mt-0.5">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Waiting for entry - Timer starts when you park
-              </div>
-            </div>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onStopSession}
-            disabled={isStoppingSession}
-            className="shrink-0 border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
-          >
-            Cancel
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  // Active state - timer running
   return (
-    <div className="bg-card border border-border rounded-lg p-4">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground">
-            <Clock className="h-5 w-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground truncate">{session.zoneName}</p>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>Spot {session.spotNumber}</span>
-              <span>·</span>
-              <span className="font-mono">{duration.text}</span>
+    <Card className="w-full shadow-lg border-2 border-primary">
+      <CardContent className="p-4">
+        <div className="flex flex-col gap-3">
+          {/* Header */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <MapPin className="w-5 h-5 text-primary" />
+              <div>
+                <p className="font-semibold text-sm">{session.zoneName}</p>
+                <p className="text-xs text-muted-foreground">
+                  Spot {session.spotNumber}
+                </p>
+              </div>
             </div>
-            <div className="text-xs text-primary font-medium mt-0.5">
-              ~{currentCost} MAD
+            
+            {/* Status Badge */}
+            <div
+              className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                session.status === "active"
+                  ? "bg-green-500/20 text-green-700 border border-green-500/30"
+                  : "bg-blue-500/20 text-blue-700 border border-blue-500/30"
+              }`}
+            >
+              {session.status === "active" ? "⏱️ Active" : "📍 Reserved"}
             </div>
-            {/* 
-              SENSOR INTEGRATION NOTE:
-              In production, the timer stops automatically when the sensor detects the vehicle leaving.
-              The "Stop" button below is for manual override or demo purposes.
-              Backend API: POST /api/sensors/exit-detected
-            */}
           </div>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onStopSession}
-          disabled={isStoppingSession}
-          className="shrink-0 border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
-        >
-          <StopCircle className="h-4 w-4 mr-1.5" />
-          Stop
-        </Button>
-      </div>
-    </div>
-  );
-};
 
-export default ActiveSessionBanner;
+          {/* Timer & Cost */}
+          {session.status === "active" && session.startTime && (
+            <>
+              <div className="border-t pt-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-primary" />
+                    <span className="text-sm text-muted-foreground">
+                      Duration
+                    </span>
+                  </div>
+                  <span className="text-xl font-mono font-bold">
+                    {formatTime(elapsedTime)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="border-t pt-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">
+                    Current Cost
+                  </span>
+                  <span className="text-2xl font-bold text-primary">
+                    {currentCost.toFixed(2)}€
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground text-right mt-1">
+                  {hourlyRate.toFixed(2)}€/hour
+                </p>
+              </div>
+            </>
+          )}
+
+          {/* Waiting Message */}
+          {session.status === "reserved" && (
+            <div className="border-t pt-3">
+              <div className="flex items-center gap-2 text-blue-600">
+                <Clock className="w-4 h-4 animate-pulse" />
+                <p className="text-sm font-medium">
+                  Waiting for entry detection...
+                </p>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                Drive to the parking spot. Timer will start automatically when
+                the sensor detects your vehicle.
+              </p>
+            </div>
+          )}
+
+          {/* 🔥 AUTOMATIC EXIT DETECTION MESSAGE 🔥 */}
+          {session.status === "active" && (
+            <div className="border-t pt-3">
+              <div className="flex items-center gap-2 text-amber-600">
+                <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+                <p className="text-xs font-medium">
+                  Timer will stop automatically when you exit
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
