@@ -1,0 +1,720 @@
+[
+    {
+        "id": "5f141b57764cd770",
+        "type": "tab",
+        "label": "Simulation Parking Réaliste",
+        "disabled": false,
+        "info": "Version corrigée avec validation des capteurs"
+    },
+    {
+        "id": "1e70bacdd84d0292",
+        "type": "inject",
+        "z": "5f141b57764cd770",
+        "name": "🔍 Charger tous les capteurs",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 2,
+        "topic": "load_sensors",
+        "payload": "",
+        "payloadType": "date",
+        "x": 180,
+        "y": 120,
+        "wires": [
+            [
+                "25d983931de17303"
+            ]
+        ]
+    },
+    {
+        "id": "25d983931de17303",
+        "type": "http request",
+        "z": "5f141b57764cd770",
+        "name": "API Get Sensors",
+        "method": "GET",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "http://localhost:8080/api/sensors",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 400,
+        "y": 120,
+        "wires": [
+            [
+                "e0ed1bedbba792ed"
+            ]
+        ]
+    },
+    {
+        "id": "e0ed1bedbba792ed",
+        "type": "function",
+        "z": "5f141b57764cd770",
+        "name": "Stocker capteurs en mémoire (amélioré)",
+        "func": "// Stocker tous les capteurs dans le contexte global\nconst sensors = msg.payload;\n\nif (!Array.isArray(sensors) || sensors.length === 0) {\n    node.error(\"❌ ERREUR: Pas de capteurs reçus ou tableau vide\");\n    node.error(\"Payload reçu:\", JSON.stringify(msg.payload, null, 2));\n    return null;\n}\n\n// Stocker dans le contexte global\nflow.set(\"all_sensors\", sensors);\nflow.set(\"sensors_count\", sensors.length);\nflow.set(\"active_sessions\", {}); \nflow.set(\"session_counter\", 0);\n\n// Logger les IDs des capteurs pour vérification\nconst sensorIds = sensors.map(s => s.sensorId);\nnode.warn(`✅ ${sensors.length} capteurs chargés`);\nnode.warn(`📋 Liste des capteurs: ${sensorIds.slice(0, 10).join(', ')}${sensorIds.length > 10 ? '...' : ''}`);\n\n// Vérifier s'il y a sensor_001 (ne devrait pas exister)\nconst hasSensor001 = sensors.some(s => s.sensorId === 'sensor_001');\nif (hasSensor001) {\n    node.warn('⚠️ ATTENTION: sensor_001 existe dans la base!');\n}\n\n// Préparer le message pour l'affichage\nmsg.payload = {\n    message: `✅ ${sensors.length} capteurs chargés avec succès`,\n    count: sensors.length,\n    zones: [...new Set(sensors.map(s => s.zoneName))].length,\n    hasSensor001: hasSensor001,\n    sample: sensors.slice(0, 3).map(s => ({\n        sensorId: s.sensorId,\n        spotNumber: s.spotNumber,\n        zoneName: s.zoneName\n    }))\n};\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 690,
+        "y": 120,
+        "wires": [
+            [
+                "382397c869985221"
+            ]
+        ]
+    },
+    {
+        "id": "382397c869985221",
+        "type": "debug",
+        "z": "5f141b57764cd770",
+        "name": "📊 Info Capteurs",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1000,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "44e2520d3662d53d",
+        "type": "inject",
+        "z": "5f141b57764cd770",
+        "name": "▶️ Démarrer simulation REALISTE",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "start_simulation",
+        "payload": "{\n  \"entryInterval\": 3000,\n  \"maxSessions\": 20,\n  \"minParkingDuration\": 10000,\n  \"maxParkingDuration\": 30000\n}",
+        "payloadType": "json",
+        "x": 180,
+        "y": 280,
+        "wires": [
+            [
+                "17ec25e412be1c48"
+            ]
+        ]
+    },
+    {
+        "id": "17ec25e412be1c48",
+        "type": "function",
+        "z": "5f141b57764cd770",
+        "name": "Générateur réaliste (Entrée + Sortie)",
+        "func": "// Nouveau générateur réaliste avec validation améliorée\nconst config = msg.payload;\nconst sensors = flow.get(\"all_sensors\") || [];\n\nif (sensors.length === 0) {\n    node.error(\"❌ Aucun capteur chargé. Chargez d'abord les capteurs.\");\n    return null;\n}\n\n// Arrêter l'ancienne simulation si elle existe\nconst oldIntervalId = flow.get(\"simulation_interval\");\nif (oldIntervalId) {\n    clearInterval(oldIntervalId);\n    flow.set(\"simulation_interval\", null);\n}\n\n// Réinitialiser\nlet sessionCounter = 0;\nflow.set(\"session_counter\", 0);\nconst activeSessions = {};\nflow.set(\"active_sessions\", activeSessions);\nconst maxSessions = config.maxSessions || 20;\n\n// Fonction pour générer une entrée\nfunction generateEntry() {\n    // VÉRIFICATION : s'assurer que les capteurs sont chargés\n    const sensors = flow.get(\"all_sensors\") || [];\n    if (sensors.length === 0) {\n        node.error(\"❌ Aucun capteur chargé dans flow.all_sensors\");\n        return;\n    }\n    \n    // Vérifier le nombre maximum de sessions\n    const currentActiveSessions = flow.get(\"active_sessions\") || {};\n    const activeCount = Object.keys(currentActiveSessions).length;\n    \n    if (activeCount >= maxSessions) {\n        node.warn(`Maximum de sessions atteint (${maxSessions}). Attente de libération...`);\n        return;\n    }\n    \n    // Choisir un capteur libre\n    const busySensors = Object.keys(currentActiveSessions);\n    const freeSensors = sensors.filter(s => !busySensors.includes(s.sensorId));\n    \n    if (freeSensors.length === 0) {\n        node.warn(\"Tous les capteurs sont occupés\");\n        return;\n    }\n    \n    const randomSensor = freeSensors[Math.floor(Math.random() * freeSensors.length)];\n    sessionCounter++;\n    \n    // Créer l'événement d'entrée\n    const entryEvent = {\n        sensorId: randomSensor.sensorId,\n        status: \"occupied\",\n        timestamp: new Date().toISOString(),\n        sessionId: sessionCounter,\n        zoneName: randomSensor.zoneName,\n        spotNumber: randomSensor.spotNumber,\n        eventType: \"entry\"\n    };\n    \n    // Calculer la durée de stationnement (entre min et max)\n    const parkingDuration = Math.floor(\n        Math.random() * (config.maxParkingDuration - config.minParkingDuration) + config.minParkingDuration\n    );\n    \n    // Enregistrer la session active\n    currentActiveSessions[randomSensor.sensorId] = {\n        sessionId: sessionCounter,\n        startTime: new Date(),\n        exitTimer: null,\n        spotInfo: randomSensor\n    };\n    \n    flow.set(\"active_sessions\", currentActiveSessions);\n    flow.set(\"session_counter\", sessionCounter);\n    \n    // Planifier la sortie automatique\n    const exitTimer = setTimeout(() => {\n        generateExit(randomSensor.sensorId);\n    }, parkingDuration);\n    \n    // Stocker le timer\n    currentActiveSessions[randomSensor.sensorId].exitTimer = exitTimer;\n    \n    // Envoyer l'événement d'entrée\n    node.send([\n        null, // Pour debug\n        { payload: entryEvent, topic: \"parking/event\" } // Pour traitement\n    ]);\n    \n    node.warn(`🚗 ENTRÉE: Session ${sessionCounter} sur ${randomSensor.spotNumber} (${randomSensor.zoneName}) - Sortie dans ${parkingDuration/1000}s`);\n}\n\n// Fonction pour générer une sortie\nfunction generateExit(sensorId) {\n    const activeSessions = flow.get(\"active_sessions\") || {};\n    const session = activeSessions[sensorId];\n    \n    if (!session) {\n        node.warn(`Tentative de sortie pour capteur non actif: ${sensorId}`);\n        return;\n    }\n    \n    // Créer l'événement de sortie\n    const exitEvent = {\n        sensorId: sensorId,\n        status: \"free\",\n        timestamp: new Date().toISOString(),\n        sessionId: session.sessionId,\n        zoneName: session.spotInfo.zoneName,\n        spotNumber: session.spotInfo.spotNumber,\n        eventType: \"exit\",\n        parkingDuration: new Date() - session.startTime\n    };\n    \n    // Supprimer la session active\n    delete activeSessions[sensorId];\n    flow.set(\"active_sessions\", activeSessions);\n    \n    // Envoyer l'événement de sortie\n    node.send([\n        null, // Pour debug\n        { payload: exitEvent, topic: \"parking/event\" } // Pour traitement\n    ]);\n    \n    node.warn(`🚪 SORTIE: Session ${session.sessionId} sur ${session.spotInfo.spotNumber} - Durée: ${exitEvent.parkingDuration}ms`);\n}\n\n// Démarrer l'intervalle pour les entrées\nconst intervalId = setInterval(() => {\n    try {\n        generateEntry();\n    } catch (error) {\n        node.error(\"Erreur dans generateEntry:\", error);\n    }\n}, config.entryInterval || 3000);\n\nflow.set(\"simulation_interval\", intervalId);\n\n// Message de démarrage\nmsg.payload = {\n    message: `Simulation réaliste démarrée`,\n    config: config,\n    maxSessions: maxSessions,\n    parkingDuration: `${config.minParkingDuration/1000}-${config.maxParkingDuration/1000}s`,\n    totalSensors: sensors.length\n};\n\nreturn msg;",
+        "outputs": 2,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 280,
+        "y": 200,
+        "wires": [
+            [
+                "2407ded0fb3fcbb2"
+            ],
+            [
+                "3de39f0c8719e2b9"
+            ]
+        ]
+    },
+    {
+        "id": "3de39f0c8719e2b9",
+        "type": "function",
+        "z": "5f141b57764cd770",
+        "name": "Traiter événement capteur (validé)",
+        "func": "// Ne traiter que les événements de type parking/event\nif (msg.topic !== \"parking/event\") {\n    return null;\n}\n\nconst event = msg.payload;\n\n// VÉRIFICATION CRITIQUE : s'assurer que le capteur existe\nconst allSensors = flow.get(\"all_sensors\") || [];\nconst sensorExists = allSensors.some(s => s.sensorId === event.sensorId);\n\nif (!sensorExists) {\n    node.warn(`⚠️ Capteur non trouvé: ${event.sensorId}. Événement ignoré.`);\n    return null; // Ignorer cet événement\n}\n\n// ✅ Formatage correct du timestamp\nlet cleanTimestamp = event.timestamp;\n\n// Si c'est une chaîne ISO, la nettoyer\nif (typeof cleanTimestamp === 'string') {\n    // Retirer les millisecondes et le 'Z'\n    cleanTimestamp = cleanTimestamp.replace(/\\.\\d+Z?$/, '');\n    cleanTimestamp = cleanTimestamp.replace('Z', '');\n}\n\n// ✅ Créer le payload exact attendu par l'API\nconst apiPayload = {\n    sensorId: event.sensorId,\n    status: event.status,\n    timestamp: cleanTimestamp\n};\n\n// ✅ Logger pour debugging\nconst logPrefix = event.eventType === \"entry\" ? \"📤 ENVOI ENTRÉE\" : \"📤 ENVOI SORTIE\";\nnode.warn(`${logPrefix}: ${event.spotNumber || 'N/A'} (${event.zoneName || 'N/A'}) - Capteur: ${event.sensorId}`);\n\n// ✅ Retourner avec headers explicites\nreturn {\n    payload: apiPayload,\n    headers: {\n        \"Content-Type\": \"application/json\"\n    }\n};",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 700,
+        "y": 200,
+        "wires": [
+            [
+                "afbeedcb7caf1bd4"
+            ]
+        ]
+    },
+    {
+        "id": "afbeedcb7caf1bd4",
+        "type": "http request",
+        "z": "5f141b57764cd770",
+        "name": "Envoyer détection",
+        "method": "POST",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "http://localhost:8080/api/parking/detect",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 990,
+        "y": 200,
+        "wires": [
+            [
+                "39340dbea9ca8325"
+            ]
+        ]
+    },
+    {
+        "id": "39340dbea9ca8325",
+        "type": "function",
+        "z": "5f141b57764cd770",
+        "name": "Filtrer réponses indésirables",
+        "func": "// Filtrer les requêtes de test provenant d'autres sources\nif (msg.payload) {\n    // Si c'est une erreur de capteur inconnu\n    if (msg.payload.action === 'error' && msg.payload.message && msg.payload.message.includes('Capteur non trouvé')) {\n        // Vérifier si c'est sensor_001\n        const errorMsg = msg.payload.message || '';\n        if (errorMsg.includes('sensor_001')) {\n            node.warn('🚫 Bloqué: Requête de test pour sensor_001 (venant d\\'une autre source)');\n            return null; // Ignorer complètement\n        }\n    }\n    \n    // Si c'est une réponse de détection normale\n    if (msg.payload.action && (msg.payload.action === 'entry_detected' || msg.payload.action === 'exit_detected')) {\n        // Vérifier que le capteur existe dans notre liste\n        const allSensors = flow.get('all_sensors') || [];\n        const sensorId = 'sensor_' + msg.payload.spotId;\n        \n        if (!allSensors.some(s => s.sensorId === sensorId)) {\n            node.warn(`⚠️ Réponse pour capteur inconnu: ${sensorId} (spotId: ${msg.payload.spotId})`);\n        }\n    }\n}\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1250,
+        "y": 200,
+        "wires": [
+            [
+                "754189599d43cf48"
+            ]
+        ]
+    },
+    {
+        "id": "754189599d43cf48",
+        "type": "debug",
+        "z": "5f141b57764cd770",
+        "name": "📤 Réponse Backend",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1450,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "2407ded0fb3fcbb2",
+        "type": "debug",
+        "z": "5f141b57764cd770",
+        "name": "🔄 Info Simulation",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 700,
+        "y": 260,
+        "wires": []
+    },
+    {
+        "id": "420654c319f29199",
+        "type": "inject",
+        "z": "5f141b57764cd770",
+        "name": "⏹️ Arrêter simulation",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "stop_simulation",
+        "payload": "",
+        "payloadType": "str",
+        "x": 190,
+        "y": 360,
+        "wires": [
+            [
+                "93d904a5d6fb20e4"
+            ]
+        ]
+    },
+    {
+        "id": "93d904a5d6fb20e4",
+        "type": "function",
+        "z": "5f141b57764cd770",
+        "name": "Arrêter générateur (réaliste)",
+        "func": "// Arrêter l'intervalle\nconst intervalId = flow.get(\"simulation_interval\");\n\nif (intervalId) {\n    clearInterval(intervalId);\n    flow.set(\"simulation_interval\", null);\n}\n\n// Arrêter tous les timers de sortie\nconst activeSessions = flow.get(\"active_sessions\") || {};\nObject.values(activeSessions).forEach(session => {\n    if (session.exitTimer) {\n        clearTimeout(session.exitTimer);\n    }\n});\n\n// Forcer la sortie des sessions actives\nObject.entries(activeSessions).forEach(([sensorId, session]) => {\n    // Générer un événement de sortie immédiat\n    const exitEvent = {\n        sensorId: sensorId,\n        status: \"free\",\n        timestamp: new Date().toISOString(),\n        sessionId: session.sessionId,\n        zoneName: session.spotInfo.zoneName,\n        spotNumber: session.spotInfo.spotNumber,\n        eventType: \"forced_exit\"\n    };\n    \n    // Envoyer l'événement\n    node.send([null, { payload: exitEvent, topic: \"parking/event\" }]);\n    node.warn(`⚠️ SORTIE FORCÉE: Session ${session.sessionId} sur ${session.spotInfo.spotNumber}`);\n});\n\n// Réinitialiser\nflow.set(\"active_sessions\", {});\n\nconst sessionCount = flow.get(\"session_counter\") || 0;\nconst activeCount = Object.keys(activeSessions).length;\n\nmsg.payload = {\n    message: `✅ Simulation arrêtée`,\n    totalSessions: sessionCount,\n    sessionsForceClosed: activeCount,\n    activeSessionsClosed: activeCount\n};\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 420,
+        "y": 360,
+        "wires": [
+            [
+                "2407ded0fb3fcbb2"
+            ]
+        ]
+    },
+    {
+        "id": "637f839f2f3367bb",
+        "type": "inject",
+        "z": "5f141b57764cd770",
+        "name": "👁️ Monitor sessions actives",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "10",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 5,
+        "topic": "monitor_sessions",
+        "payload": "",
+        "payloadType": "date",
+        "x": 190,
+        "y": 440,
+        "wires": [
+            [
+                "a82de89fd1546561"
+            ]
+        ]
+    },
+    {
+        "id": "a82de89fd1546561",
+        "type": "function",
+        "z": "5f141b57764cd770",
+        "name": "Monitor sessions",
+        "func": "const activeSessions = flow.get(\"active_sessions\") || {};\nconst sensors = flow.get(\"all_sensors\") || [];\nconst sessionCounter = flow.get(\"session_counter\") || 0;\n\n// Calculer les stats\nconst activeCount = Object.keys(activeSessions).length;\nconst totalSensors = sensors.length;\nconst freeSensors = totalSensors - activeCount;\n\n// Préparer la liste des sessions actives\nconst sessionsList = Object.entries(activeSessions).map(([sensorId, session]) => {\n    const sensor = sensors.find(s => s.sensorId === sensorId);\n    return {\n        sessionId: session.sessionId,\n        sensorId: sensorId,\n        spotNumber: sensor ? sensor.spotNumber : 'N/A',\n        zoneName: sensor ? sensor.zoneName : 'N/A',\n        duration: Math.floor((new Date() - session.startTime) / 1000) + 's'\n    };\n});\n\nmsg.payload = {\n    timestamp: new Date().toLocaleTimeString('fr-FR'),\n    stats: {\n        totalSessionsCreated: sessionCounter,\n        activeSessions: activeCount,\n        freeSpots: freeSensors,\n        totalSpots: totalSensors,\n        occupationRate: totalSensors > 0 ? ((activeCount / totalSensors) * 100).toFixed(1) + '%' : '0%'\n    },\n    activeSessions: sessionsList\n};\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 420,
+        "y": 440,
+        "wires": [
+            [
+                "4ef635c3cf69c974"
+            ]
+        ]
+    },
+    {
+        "id": "4ef635c3cf69c974",
+        "type": "debug",
+        "z": "5f141b57764cd770",
+        "name": "📈 Sessions Actives",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 650,
+        "y": 440,
+        "wires": []
+    },
+    {
+        "id": "8405f1971dd08fda",
+        "type": "inject",
+        "z": "5f141b57764cd770",
+        "name": "📊 Rafraîchir statut API",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "30",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 5,
+        "topic": "refresh_status",
+        "payload": "",
+        "payloadType": "date",
+        "x": 190,
+        "y": 520,
+        "wires": [
+            [
+                "9339c94ee85dcbfa"
+            ]
+        ]
+    },
+    {
+        "id": "9339c94ee85dcbfa",
+        "type": "http request",
+        "z": "5f141b57764cd770",
+        "name": "API Statut Parking",
+        "method": "GET",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "http://localhost:8080/api/parking/status",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 420,
+        "y": 520,
+        "wires": [
+            [
+                "4fa5fb85e44b854f"
+            ]
+        ]
+    },
+    {
+        "id": "4fa5fb85e44b854f",
+        "type": "function",
+        "z": "5f141b57764cd770",
+        "name": "Analyser statut",
+        "func": "const status = msg.payload;\n\n// Comparer avec notre état local\nconst activeSessions = flow.get(\"active_sessions\") || {};\nconst localActive = Object.keys(activeSessions).length;\n\n// Créer un rapport\nconst report = {\n    timestamp: new Date().toLocaleTimeString('fr-FR'),\n    totalSpots: status.totalSpots,\n    occupiedSpotsAPI: status.occupiedSpots,\n    occupiedSpotsLocal: localActive,\n    freeSpots: status.freeSpots,\n    occupationRate: status.occupationRate,\n    zones: Object.keys(status.zones || {}).length,\n    syncStatus: status.occupiedSpots === localActive ? \"✅ Synchronisé\" : \"⚠️ Désynchronisé\",\n    difference: Math.abs(status.occupiedSpots - localActive)\n};\n\n// Si occupation > 80%, envoyer une alerte\nif (status.totalSpots > 0 && (status.occupiedSpots / status.totalSpots) > 0.8) {\n    return [\n        { payload: report },\n        {\n            payload: {\n                alert: true,\n                type: \"HIGH_OCCUPATION\",\n                message: `⚠️ Occupation élevée: ${status.occupationRate}`,\n                details: report\n            }\n        }\n    ];\n}\n\n// Si désynchronisation importante\nif (Math.abs(status.occupiedSpots - localActive) > 5) {\n    node.warn(`⚠️ Désynchronisation importante: API=${status.occupiedSpots}, Local=${localActive}`);\n}\n\nreturn [{ payload: report }, null];",
+        "outputs": 2,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 650,
+        "y": 520,
+        "wires": [
+            [
+                "3dc6029e1192c4c5"
+            ],
+            [
+                "7a1e51a971f399fa"
+            ]
+        ]
+    },
+    {
+        "id": "3dc6029e1192c4c5",
+        "type": "debug",
+        "z": "5f141b57764cd770",
+        "name": "📈 Rapport Occupation",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 850,
+        "y": 500,
+        "wires": []
+    },
+    {
+        "id": "7a1e51a971f399fa",
+        "type": "debug",
+        "z": "5f141b57764cd770",
+        "name": "🚨 Alertes",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 850,
+        "y": 540,
+        "wires": []
+    },
+    {
+        "id": "adc11be6a3c102b9",
+        "type": "inject",
+        "z": "5f141b57764cd770",
+        "name": "🧹 Forcer nettoyage sessions",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "force_cleanup",
+        "payload": "",
+        "payloadType": "str",
+        "x": 190,
+        "y": 600,
+        "wires": [
+            [
+                "4fb1d1a9a19b6aff"
+            ]
+        ]
+    },
+    {
+        "id": "4fb1d1a9a19b6aff",
+        "type": "function",
+        "z": "5f141b57764cd770",
+        "name": "Nettoyer sessions orphelines",
+        "func": "// Vérifier les sessions actives et envoyer des sorties pour celles qui sont trop anciennes\nconst activeSessions = flow.get(\"active_sessions\") || {};\nconst MAX_SESSION_DURATION = 120000; // 2 minutes max\nconst now = new Date();\nlet cleanedCount = 0;\n\nObject.entries(activeSessions).forEach(([sensorId, session]) => {\n    const duration = now - session.startTime;\n    \n    if (duration > MAX_SESSION_DURATION) {\n        // Session trop ancienne, forcer la sortie\n        const exitEvent = {\n            sensorId: sensorId,\n            status: \"free\",\n            timestamp: now.toISOString(),\n            sessionId: session.sessionId,\n            zoneName: session.spotInfo.zoneName,\n            spotNumber: session.spotInfo.spotNumber,\n            eventType: \"cleanup_exit\",\n            reason: \"Session trop longue\"\n        };\n        \n        // Envoyer l'événement\n        node.send([null, { payload: exitEvent, topic: \"parking/event\" }]);\n        \n        // Supprimer le timer s'il existe\n        if (session.exitTimer) {\n            clearTimeout(session.exitTimer);\n        }\n        \n        // Supprimer de la liste\n        delete activeSessions[sensorId];\n        cleanedCount++;\n        \n        node.warn(`🧹 NETTOYAGE: Session ${session.sessionId} sur ${session.spotInfo.spotNumber} - Durée: ${duration}ms`);\n    }\n});\n\n// Mettre à jour l'état\nflow.set(\"active_sessions\", activeSessions);\n\nmsg.payload = {\n    message: `Nettoyage effectué`,\n    sessionsCleaned: cleanedCount,\n    remainingSessions: Object.keys(activeSessions).length\n};\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 420,
+        "y": 600,
+        "wires": [
+            [
+                "2407ded0fb3fcbb2"
+            ]
+        ]
+    },
+    {
+        "id": "0ff3bdf0e6d4bff0",
+        "type": "catch",
+        "z": "5f141b57764cd770",
+        "name": "Catch Errors",
+        "scope": null,
+        "uncaught": false,
+        "x": 190,
+        "y": 680,
+        "wires": [
+            [
+                "13467e20ddb1740d"
+            ]
+        ]
+    },
+    {
+        "id": "13467e20ddb1740d",
+        "type": "debug",
+        "z": "5f141b57764cd770",
+        "name": "❌ Erreurs",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 420,
+        "y": 680,
+        "wires": []
+    },
+    {
+        "id": "470199a36da645f6",
+        "type": "inject",
+        "z": "5f141b57764cd770",
+        "name": "🔍 Tester endpoints API",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 1,
+        "topic": "test_api",
+        "payload": "",
+        "payloadType": "date",
+        "x": 180,
+        "y": 760,
+        "wires": [
+            [
+                "7cacc8636e9a089d"
+            ]
+        ]
+    },
+    {
+        "id": "7cacc8636e9a089d",
+        "type": "function",
+        "z": "5f141b57764cd770",
+        "name": "Tester différents endpoints",
+        "func": "// Tester différents endpoints pour voir ce qui fonctionne\nconst tests = [\n    { name: 'Liste capteurs', url: 'http://localhost:8080/api/sensors', method: 'GET' },\n    { name: 'Statut parking', url: 'http://localhost:8080/api/parking/status', method: 'GET' },\n    { name: 'Fire events (404 attendu)', url: 'http://localhost:8080/api/fire-events', method: 'POST' }\n];\n\n// Envoyer les tests\nconst results = [];\n\n// Tester le premier\nmsg.url = tests[0].url;\nmsg.method = tests[0].method;\nmsg._testName = tests[0].name;\n\nnode.send([msg, null, null]);\n\n// Les autres tests seront envoyés via des timeout\nsetTimeout(() => {\n    const msg2 = { ...msg };\n    msg2.url = tests[1].url;\n    msg2.method = tests[1].method;\n    msg2._testName = tests[1].name;\n    node.send([null, msg2, null]);\n}, 1000);\n\nsetTimeout(() => {\n    const msg3 = { ...msg };\n    msg3.url = tests[2].url;\n    msg3.method = tests[2].method;\n    msg3._testName = tests[2].name;\n    msg3.payload = {};\n    node.send([null, null, msg3]);\n}, 2000);\n\nreturn null;",
+        "outputs": 3,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 420,
+        "y": 760,
+        "wires": [
+            [
+                "61a0a72892fbe89e"
+            ],
+            [
+                "61a0a72892fbe89e"
+            ],
+            [
+                "61a0a72892fbe89e"
+            ]
+        ]
+    },
+    {
+        "id": "61a0a72892fbe89e",
+        "type": "http request",
+        "z": "5f141b57764cd770",
+        "name": "Test Request",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 650,
+        "y": 760,
+        "wires": [
+            [
+                "99fca772f5a6ac51"
+            ]
+        ]
+    },
+    {
+        "id": "99fca772f5a6ac51",
+        "type": "debug",
+        "z": "5f141b57764cd770",
+        "name": "📋 Test API Results",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 850,
+        "y": 760,
+        "wires": []
+    },
+    {
+        "id": "57001992f8d56ad3",
+        "type": "inject",
+        "z": "5f141b57764cd770",
+        "name": "🧪 TEST MANUEL - ENTRÉE (occupied)",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "parking/event",
+        "payload": "{  \"sensorId\": \"sensor_31_006\",  \"status\": \"occupied\",  \"timestamp\": \"${new Date().toISOString()}\" ,  \"eventType\": \"manual_entry\",  \"spotNumber\": \"MANUAL\",  \"zoneName\": \"MANUAL\"}",
+        "payloadType": "json",
+        "x": 220,
+        "y": 860,
+        "wires": [
+            [
+                "8c06c146ee41ab00"
+            ]
+        ]
+    },
+    {
+        "id": "950d2581b6df9b08",
+        "type": "inject",
+        "z": "5f141b57764cd770",
+        "name": "🧪 TEST MANUEL - SORTIE (free)",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "parking/event",
+        "payload": "{  \"sensorId\": \"sensor_31_006\",  \"status\": \"free\",  \"timestamp\": \"${new Date().toISOString()}\" ,  \"eventType\": \"manual_exit\",  \"spotNumber\": \"MANUAL\",  \"zoneName\": \"MANUAL\"}",
+        "payloadType": "json",
+        "x": 220,
+        "y": 920,
+        "wires": [
+            [
+                "8c06c146ee41ab00"
+            ]
+        ]
+    },
+    {
+        "id": "8c06c146ee41ab00",
+        "type": "function",
+        "z": "5f141b57764cd770",
+        "name": "Préparer event manuel (format identique)",
+        "func": "// Inject JSON ne peut pas exécuter ${new Date()} comme template -> on fixe ici\nconst event = msg.payload;\n\n// Set timestamp propre (ISO) puis sera nettoyé par Traiter événement capteur\nif (!event.timestamp || event.timestamp.includes('${')) {\n    event.timestamp = new Date().toISOString();\n}\n\nmsg.topic = \"parking/event\";\nmsg.payload = event;\n\nnode.warn(`🧪 TEST MANUEL: ${event.sensorId} -> ${event.status} @ ${event.timestamp}`);\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 640,
+        "y": 880,
+        "wires": [
+            [
+                "3de39f0c8719e2b9"
+            ]
+        ]
+    }
+]

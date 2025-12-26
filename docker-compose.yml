@@ -1,46 +1,119 @@
 services:
   mysql:
     image: mysql:8.0
+    container_name: parking-mysql
     environment:
       MYSQL_ROOT_PASSWORD: 'root_password'
       MYSQL_DATABASE: 'parking_db'
       MYSQL_USER: 'parking_user'
       MYSQL_PASSWORD: 'password'
         # 1. Dire à Spring d'attendre que Hibernate ait fini avant de lancer le SQL
-      SPRING_JPA_DEFER_DATASOURCE_INITIALIZATION: 'true'
+      #SPRING_JPA_DEFER_DATASOURCE_INITIALIZATION: 'true'
         # 2. Indiquer où se trouve notre fichier SQL monté
-      SPRING_SQL_INIT_DATA_LOCATIONS: 'file:/app/init-data/data.sql'
+      #SPRING_SQL_INIT_DATA_LOCATIONS: 'file:/app/init-data/data.sql'
     ports:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - data.sql:/app/init-data/data.sql
+      # - ./data.sql:/app/init-data/data.sql
+
+  backend:
+    container_name: smart-parking-service
+    build: ./backend
+    env_file:
+      - .env
+    environment:
+      SPRING_DATASOURCE_URL: 'jdbc:mysql://parking-mysql:3306/parking_db'
+      SPRING_DATASOURCE_USERNAME: 'parking_user'
+      SPRING_DATASOURCE_PASSWORD: 'password'
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+      - web
+
+  frontend:
+    container_name: smart-parking-frontend
+    build: ./frontend
+    depends_on:
+      - backend
+    networks:
+      - web
 
   kafka:
     image: confluentinc/cp-kafka:7.8.3
     container_name: kafka
     ports:
       - "9092:9092"
-
     environment:
       KAFKA_KRAFT_MODE: 'true'
-
       CLUSTER_ID: '1L6g7nGhU-eAKfL--X25wo'
       KAFKA_NODE_ID: 1
-
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-
       KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
-
     volumes:
       - kafka_kraft:/var/lib/kafka/data
+    networks:
+      - internal
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: phpmyadmin
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: root
+      PMA_PASSWORD: root
+      PMA_PORT: 3306
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - web
+      - internal
+
+  nodered:
+    build: ./nodered
+    container_name: smart-parking-nodered
+    ports:
+      - "1881:1880"
+    depends_on:
+      - backend
+    volumes:
+      - nodered_data:/data
+    networks:
+      - internal
+      - web
+
+  caddy:
+    image: caddy:2
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy:/etc/caddy:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - web
 
 volumes:
   mysql_data:
   kafka_kraft:
+  nodered_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  web:
+  internal:
