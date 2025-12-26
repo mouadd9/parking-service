@@ -13,62 +13,120 @@ import java.util.Optional;
 @Repository
 public interface ReservationRepository extends JpaRepository<Reservation, Long> {
 
-
-
-    @Query("SELECT r FROM Reservation r WHERE r.spot.id = :spotId AND r.status IN ('PENDING', 'CONFIRMED') AND :time BETWEEN r.startTime AND r.endTime")
-    List<Reservation> findPendingOrConfirmedReservationsForSpotAtTime(@Param("spotId") Long spotId, @Param("time") LocalDateTime time);
-
-    @Query("SELECT r FROM Reservation r WHERE r.driverId = :driverId AND r.spot.id = :spotId AND r.status = 'ACTIVE'")
-    Optional<Reservation> findActiveReservationForDriverAndSpot(@Param("driverId") String driverId, @Param("spotId") Long spotId);
-    // Trouver les réservations actives ou en attente pour un spot
-    @Query("SELECT r FROM Reservation r WHERE r.spot.id = :spotId AND r.status IN ('PENDING', 'ACTIVE') " +
-            "AND ((r.startTime <= :currentTime AND r.endTime >= :currentTime) OR " +
-            "(r.startTime >= :startTime AND r.startTime <= :endTime))")
-    List<Reservation> findActiveReservationsForSpot(
-            @Param("spotId") Long spotId,
-            @Param("currentTime") LocalDateTime currentTime,
-            @Param("startTime") LocalDateTime startTime,
-            @Param("endTime") LocalDateTime endTime);
+    List<Reservation> findBySpotId(Long spotId);
 
     @Query("""
-           SELECT r 
-           FROM Reservation r
-           WHERE r.spot.id = :spotId
-             AND r.status = 'CONFIRMED'
-             AND :time BETWEEN r.startTime AND r.endTime
-           ORDER BY r.startTime DESC
-           """)
-    List<Reservation> findConfirmedReservationsForSpotAtTime(
+        SELECT r
+        FROM Reservation r
+        WHERE r.spot.id = :spotId
+          AND r.status IN :statuses
+          AND :time BETWEEN r.startTime AND r.endTime
+        ORDER BY r.startTime DESC
+    """)
+    List<Reservation> findBySpotIdAndStatusInAndTimeRange(
+            @Param("spotId") Long spotId,
+            @Param("statuses") List<String> statuses,
+            @Param("time") LocalDateTime time
+    );
+
+    List<Reservation> findBySpotIdAndStatus(Long spotId, String status);
+
+    @Query("""
+        SELECT r
+        FROM Reservation r
+        WHERE r.driverId = :driverId
+          AND r.spot.id = :spotId
+          AND r.status = :status
+        ORDER BY r.startTime DESC
+    """)
+    List<Reservation> findByDriverIdAndSpotIdAndStatus(
+            @Param("driverId") String driverId,
+            @Param("spotId") Long spotId,
+            @Param("status") String status
+    );
+
+    // ✅ PENDING reservations dans l'intervalle
+    @Query("""
+        SELECT r FROM Reservation r
+        WHERE r.spot.id = :spotId
+          AND r.status = 'PENDING'
+          AND :time BETWEEN r.startTime AND r.endTime
+        ORDER BY r.startTime ASC
+    """)
+    List<Reservation> findPendingReservationsForSpotAtTime(
             @Param("spotId") Long spotId,
             @Param("time") LocalDateTime time
     );
 
-    // Trouver les réservations PENDING pour un spot à un moment donné (attente d'entrée physique)
-    @Query("SELECT r FROM Reservation r WHERE r.spot.id = :spotId AND r.status = 'PENDING' " +
-            "AND :currentTime BETWEEN r.startTime AND r.endTime")
-    List<Reservation> findPendingReservationsForSpotAtTime(
+    // ✅ CONFIRMED reservations dans l'intervalle (CORRIGÉ)
+    @Query("""
+        SELECT r FROM Reservation r
+        WHERE r.spot.id = :spotId
+          AND r.status = 'CONFIRMED'
+          AND :detectionTime BETWEEN r.startTime AND r.endTime
+        ORDER BY r.startTime ASC
+    """)
+    List<Reservation> findConfirmedReservationsForSpotAtTime(
             @Param("spotId") Long spotId,
-            @Param("currentTime") LocalDateTime currentTime);
+            @Param("detectionTime") LocalDateTime detectionTime
+    );
 
-    // Trouver les réservations ACTIVE pour un spot (utilisateur déjà entré)
-    @Query("SELECT r FROM Reservation r WHERE r.spot.id = :spotId AND r.status = 'ACTIVE' " +
-            "AND :currentTime BETWEEN r.startTime AND r.endTime")
+    // ✅ Active reservation for driver and spot
+    @Query("""
+        SELECT r FROM Reservation r
+        WHERE r.driverId = :driverId
+          AND r.spot.id = :spotId
+          AND r.status = 'ACTIVE'
+    """)
+    Optional<Reservation> findActiveReservationForDriverAndSpot(
+            @Param("driverId") String driverId,
+            @Param("spotId") Long spotId
+    );
+
+    // Trouver les réservations actives ou en attente pour un spot
+    @Query("""
+        SELECT r FROM Reservation r
+        WHERE r.spot.id = :spotId
+          AND r.status IN ('PENDING', 'ACTIVE')
+          AND (
+                (r.startTime <= :currentTime AND r.endTime >= :currentTime)
+                OR
+                (r.startTime >= :startTime AND r.startTime <= :endTime)
+              )
+    """)
+    List<Reservation> findActiveReservationsForSpot(
+            @Param("spotId") Long spotId,
+            @Param("currentTime") LocalDateTime currentTime,
+            @Param("startTime") LocalDateTime startTime,
+            @Param("endTime") LocalDateTime endTime
+    );
+
+    // Trouver les réservations ACTIVE pour un spot
+    @Query("""
+        SELECT r FROM Reservation r
+        WHERE r.spot.id = :spotId
+          AND r.status = 'ACTIVE'
+          AND :currentTime BETWEEN r.startTime AND r.endTime
+    """)
     List<Reservation> findActiveReservationsForSpotAtTime(
             @Param("spotId") Long spotId,
-            @Param("currentTime") LocalDateTime currentTime);
+            @Param("currentTime") LocalDateTime currentTime
+    );
 
-    // Trouver les réservations par driverId
     List<Reservation> findByDriverId(String driverId);
 
-    // Trouver une réservation par son ID
+    @Override
     Optional<Reservation> findById(Long id);
 
-    // Vérifier la disponibilité d'un spot pour une période
-    @Query("SELECT COUNT(r) > 0 FROM Reservation r WHERE r.spot.id = :spotId " +
-            "AND r.status IN ('PENDING', 'ACTIVE') " +
-            "AND ((r.startTime <= :endTime AND r.endTime >= :startTime))")
+    @Query("""
+        SELECT COUNT(r) > 0 FROM Reservation r
+        WHERE r.spot.id = :spotId
+          AND r.status IN ('PENDING', 'ACTIVE')
+          AND (r.startTime <= :endTime AND r.endTime >= :startTime)
+    """)
     boolean isSpotReservedForPeriod(
             @Param("spotId") Long spotId,
             @Param("startTime") LocalDateTime startTime,
-            @Param("endTime") LocalDateTime endTime);
+            @Param("endTime") LocalDateTime endTime
+    );
 }
