@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
+
 @Entity
 @Table(name = "parking_spots")
 @Data
@@ -25,6 +27,9 @@ public class ParkingSpot {
     private String sensorId;   // Lien avec IoT (ex: "SENSOR-XYZ")
 
     private Boolean status;
+
+    @Column(name = "hourly_rate", precision = 38, scale = 2)
+    private BigDecimal hourlyRate;
 
     @ManyToOne
     @JoinColumn(name = "zone_id")
