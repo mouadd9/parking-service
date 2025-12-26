@@ -20,6 +20,8 @@ export interface ParkingSession {
   zoneId: string;
   zoneName: string;
   spotNumber: string;
+  spotId?: number; // Backend spot ID
+  reservationId?: number; // Backend reservation ID
   startTime?: Date; // Only set when sensor detects entry
   endTime?: Date;
   totalCost?: number;

@@ -12,9 +12,9 @@ export interface GeoJSONFeature {
     coordinates: number[] | number[][] | number[][][] | number[][][][];
   };
   properties: {
-    id: string;
-    osmId: number;
-    osmType: string;
+    id: string | number;
+    osmId?: number;
+    osmType?: string;
     name: string;
     access?: string;
     surface?: string;
@@ -22,6 +22,7 @@ export interface GeoJSONFeature {
     fee?: string;
     parking?: string;
     centroid: [number, number]; // [lat, lon] for marker placement
+    hourlyRate?: number; // Added for backend parking zones
   };
 }
 

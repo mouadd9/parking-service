@@ -10,29 +10,27 @@ import SearchInput from '@/components/parking/SearchInput';
 import NavigationTabs from '@/components/parking/NavigationTabs';
 import SessionHistoryList from '@/components/parking/SessionHistoryList';
 import { useParkingData } from '@/hooks/useParkingData';
-import { useOverpassParkings } from '@/hooks/useOverpassParkings';
+import { useParkingZonesFromBackend } from '@/hooks/useParkingZonesFromBackend';
 import { GeoJSONFeature } from '@/utils/overpassToGeoJSON';
 import { ParkingSpot, ParkingSession } from '@/types/parking';
 import { useToast } from '@/hooks/use-toast';
+import { parkingApi } from '@/services/parkingApi';
 
-// Generate mock spots for OSM parkings - just numbers, no letters
-const generateSpotsForParking = (parkingId: string, capacity?: string): ParkingSpot[] => {
-  const count = capacity ? parseInt(capacity) : Math.floor(Math.random() * 20) + 10;
-  return Array.from({ length: count }, (_, i) => ({
-    id: `${parkingId}-${i + 1}`,
-    spotNumber: String(i + 1), // Just the number, no letter prefix
-    status: Math.random() > 0.6 ? 'free' : 'occupied' as const,
-    zoneId: parkingId,
-  }));
-};
+// TODO: Replace with real auth when Clerk is set up
+const MOCK_USER_ID = "test-user-1";
 
-// Get hourly rate based on parking type
+// Get hourly rate from parking properties (now from backend)
 const getHourlyRate = (parking: GeoJSONFeature | null): number => {
-  if (!parking) return 5.00;
+  if (!parking) return 10.00;
+  // Use the hourly rate from the backend if available
+  if (parking.properties.hourlyRate) {
+    return Number(parking.properties.hourlyRate);
+  }
+  // Fallback to access-based pricing
   const access = parking.properties.access;
-  if (access === 'private') return 8.00;
-  if (access === 'customers') return 6.00;
-  return 5.00;
+  if (access === 'private') return 12.00;
+  if (access === 'customers') return 8.00;
+  return 10.00;
 };
 
 const Index = () => {
@@ -46,13 +44,15 @@ const Index = () => {
   const [spotsCache, setSpotsCache] = useState<Record<string, ParkingSpot[]>>({});
   const [currentSessionRate, setCurrentSessionRate] = useState(5.00);
   const [mapType, setMapType] = useState<'normal' | 'satellite'>('normal');
-  
+  const [isBooking, setIsBooking] = useState(false);
+  const [loadingSpots, setLoadingSpots] = useState(false);
+
   // State for sensor-based workflow
   // When user selects a spot, we set it as "pending" until sensor detects the vehicle
   const [pendingSpot, setPendingSpot] = useState<{ spot: ParkingSpot; parkingId: string; hourlyRate: number } | null>(null);
-  
+
   const { toast } = useToast();
-  const { geojson, loading, error } = useOverpassParkings();
+  const { geojson, loading, error } = useParkingZonesFromBackend();
   const {
     sessions,
     activeSession,
@@ -72,25 +72,50 @@ const Index = () => {
     };
   }, [geojson, searchQuery]);
 
-  // Get spots for selected parking
+  // Get spots for selected parking from backend
   const selectedParkingSpots = useMemo(() => {
     if (!selectedParking) return [];
-    
+
+    // Return cached spots if available
     if (spotsCache[selectedParking.id]) {
       return spotsCache[selectedParking.id];
     }
-    
-    const spots = generateSpotsForParking(
-      selectedParking.id, 
-      selectedParking.properties.capacity
-    );
-    setSpotsCache(prev => ({ ...prev, [selectedParking.id]: spots }));
-    return spots;
+
+    return [];
   }, [selectedParking, spotsCache]);
 
-  const handleParkingClick = (parking: GeoJSONFeature) => {
+  const handleParkingClick = async (parking: GeoJSONFeature) => {
     setSelectedParking(parking);
     setIsModalOpen(true);
+
+    // Fetch real spots from backend if not cached
+    if (!spotsCache[parking.id]) {
+      setLoadingSpots(true);
+      try {
+        const backendSpots = await parkingApi.getZoneSpots(Number(parking.id));
+
+        // Convert backend spots to frontend format
+        const frontendSpots: ParkingSpot[] = backendSpots.map(spot => ({
+          id: String(spot.id),
+          spotNumber: spot.spotNumber,
+          status: spot.status ? 'free' : 'occupied',
+          zoneId: String(spot.zone.id),
+        }));
+
+        setSpotsCache(prev => ({ ...prev, [parking.id]: frontendSpots }));
+      } catch (error) {
+        console.error('Failed to fetch spots:', error);
+        toast({
+          title: "⚠️ No Spots Available",
+          description: "This parking zone has no spots defined yet. Please add spots in the database first.",
+          variant: "destructive",
+        });
+        // Set empty array to prevent infinite loading
+        setSpotsCache(prev => ({ ...prev, [parking.id]: [] }));
+      } finally {
+        setLoadingSpots(false);
+      }
+    }
   };
 
   const handleCloseModal = () => {
@@ -122,47 +147,71 @@ const Index = () => {
    *   return () => ws.close();
    * }, [pendingSpot]);
    */
-  const handleBookSpot = (spot: ParkingSpot, hourlyRate: number) => {
+  const handleBookSpot = async (spot: ParkingSpot, hourlyRate: number) => {
     if (!selectedParking) return;
-    
-    /**
-     * SENSOR INTEGRATION POINT - SPOT RESERVATION
-     * 
-     * When user confirms a spot, we create a "reserved" session.
-     * The timer does NOT start yet - it only starts when the sensor detects the vehicle entering.
-     * 
-     * Backend API call to reserve spot:
-     * POST /api/spots/reserve
-     * Request body: { spotId: string, parkingId: string, userId: string }
-     * 
-     * After this, listen for sensor entry detection via WebSocket or polling.
-     */
-    
-    // Create session in "reserved" state - timer not started yet
-    const newSession: ParkingSession = {
-      id: `session-${Date.now()}`,
-      zoneId: selectedParking.id,
-      zoneName: selectedParking.properties.name,
-      spotNumber: spot.spotNumber,
-      // startTime is NOT set - will be set when sensor detects entry
-      status: 'reserved', // Waiting for vehicle to enter
-    };
-    
-    setActiveSession(newSession);
-    setCurrentSessionRate(hourlyRate);
-    
-    // Update spot status to booked (reserved)
-    setSpotsCache(prev => ({
-      ...prev,
-      [selectedParking.id]: prev[selectedParking.id]?.map(s => 
-        s.id === spot.id ? { ...s, status: 'booked' as const } : s
-      ) || [],
-    }));
 
-    toast({
-      title: "Spot Reserved",
-      description: `Spot ${spot.spotNumber} - Timer will start when you enter the parking`,
-    });
+    setIsBooking(true);
+
+    try {
+      /**
+       * BACKEND INTEGRATION - CREATE RESERVATION
+       *
+       * Creates a reservation in PENDING status.
+       * Timer does NOT start yet - only when Node-RED sensor detects entry.
+       *
+       * POST /api/reservations/create
+       * Creates reservation with status: PENDING
+       */
+
+      const now = new Date();
+      const endTime = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours from now
+
+      const reservation = await parkingApi.createReservation({
+        spotId: Number(spot.id), // Use real spot ID from backend
+        driverId: MOCK_USER_ID, // Using mock user ID until auth is set up
+        startTime: now.toISOString(),
+        endTime: endTime.toISOString(),
+      });
+
+      // Create frontend session in "reserved" state - timer NOT started yet
+      const newSession: ParkingSession = {
+        id: `session-${Date.now()}`,
+        zoneId: selectedParking.id,
+        zoneName: selectedParking.properties.name,
+        spotNumber: spot.spotNumber,
+        spotId: reservation.spotId,
+        reservationId: reservation.id,
+        status: 'reserved', // Waiting for Node-RED sensor to detect entry
+      };
+
+      setActiveSession(newSession);
+      setCurrentSessionRate(hourlyRate);
+
+      // Update spot status to booked (reserved)
+      setSpotsCache(prev => ({
+        ...prev,
+        [selectedParking.id]: prev[selectedParking.id]?.map(s =>
+          s.id === spot.id ? { ...s, status: 'booked' as const } : s
+        ) || [],
+      }));
+
+      handleCloseModal();
+
+      toast({
+        title: "✅ Spot Reserved",
+        description: `Spot ${spot.spotNumber} - Drive to the parking. Timer will start when Node-RED detects your entry.`,
+      });
+
+    } catch (error) {
+      console.error('Failed to create reservation:', error);
+      toast({
+        title: "❌ Reservation Failed",
+        description: error instanceof Error ? error.message : "Could not reserve spot. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsBooking(false);
+    }
   };
 
   /**
@@ -253,9 +302,6 @@ const Index = () => {
     
     setIsStoppingSession(true);
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
     // Handle cancellation of reserved spot (user hasn't entered yet)
     if (activeSession.status === 'reserved' || !activeSession.startTime) {
       /**
@@ -266,22 +312,39 @@ const Index = () => {
        * Request body: { sessionId: string, spotId: string }
        */
       
-      // Update spot status back to free
-      setSpotsCache(prev => ({
-        ...prev,
-        [activeSession.zoneId]: prev[activeSession.zoneId]?.map(s =>
-          s.spotNumber === activeSession.spotNumber ? { ...s, status: 'free' as const } : s
-        ) || [],
-      }));
-      
-      setActiveSession(null);
-      setIsStopModalOpen(false);
-      setIsStoppingSession(false);
-      
-      toast({
-        title: "Reservation Canceled",
-        description: "Your spot reservation has been canceled. No charges applied.",
-      });
+      try {
+        if (!activeSession.reservationId) {
+          throw new Error('Missing reservation id. Please refresh and try again.');
+        }
+
+        await parkingApi.cancelReservation(activeSession.reservationId);
+
+        // Update spot status back to free
+        setSpotsCache(prev => ({
+          ...prev,
+          [activeSession.zoneId]: prev[activeSession.zoneId]?.map(s =>
+            s.spotNumber === activeSession.spotNumber ? { ...s, status: 'free' as const } : s
+          ) || [],
+        }));
+
+        setActiveSession(null);
+        setIsStopModalOpen(false);
+
+        toast({
+          title: "Reservation Canceled",
+          description: "Your spot reservation has been canceled. No charges applied.",
+        });
+      } catch (error) {
+        console.error('Failed to cancel reservation:', error);
+        toast({
+          title: "❌ Cancel Failed",
+          description: error instanceof Error ? error.message : "Could not cancel reservation. Please try again.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsStoppingSession(false);
+      }
+
       return;
     }
     
@@ -423,6 +486,7 @@ const Index = () => {
             : undefined
         }
         hasActiveSession={!!activeSession}
+        isBooking={isBooking || loadingSpots}
       />
 
       {/* Stop Confirmation Modal */}

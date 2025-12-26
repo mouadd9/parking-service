@@ -4,7 +4,7 @@ import { GeoJSONFeature } from '@/utils/overpassToGeoJSON';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { MapPin, Car, Clock, CreditCard } from 'lucide-react';
+import { MapPin, Car, Clock, CreditCard, Loader2 } from 'lucide-react';
 
 interface ParkingModalProps {
   parking: GeoJSONFeature | null;
@@ -14,6 +14,7 @@ interface ParkingModalProps {
   onBookSpot: (spot: ParkingSpot, hourlyRate: number) => void;
   activeSessionSpotId?: string;
   hasActiveSession: boolean;
+  isBooking?: boolean;
 }
 
 // Mock hourly rate based on parking type
@@ -24,14 +25,15 @@ const getHourlyRate = (parking: GeoJSONFeature): number => {
   return 5.00; // Default public parking rate
 };
 
-const ParkingModal = ({ 
-  parking, 
-  spots, 
-  isOpen, 
-  onClose, 
-  onBookSpot, 
+const ParkingModal = ({
+  parking,
+  spots,
+  isOpen,
+  onClose,
+  onBookSpot,
   activeSessionSpotId,
-  hasActiveSession 
+  hasActiveSession,
+  isBooking = false
 }: ParkingModalProps) => {
   const [selectedSpot, setSelectedSpot] = useState<ParkingSpot | null>(null);
   const [showPaymentConfirm, setShowPaymentConfirm] = useState(false);
@@ -129,11 +131,18 @@ const ParkingModal = ({
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={handleCancelPayment}>
+            <Button variant="outline" onClick={handleCancelPayment} disabled={isBooking}>
               Cancel
             </Button>
-            <Button onClick={handleConfirmPayment}>
-              Reserve Spot
+            <Button onClick={handleConfirmPayment} disabled={isBooking}>
+              {isBooking ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Reserving...
+                </>
+              ) : (
+                'Reserve Spot'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
