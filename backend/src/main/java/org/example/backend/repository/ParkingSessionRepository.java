@@ -14,7 +14,7 @@ import java.util.Optional;
 
 @Repository
 public interface ParkingSessionRepository extends JpaRepository<ParkingSession, Long> {
-
+    List<ParkingSession> findByStatus(SessionStatus status);
     // Pour l'historique (Déjà fait ou à garder)
     @Query("SELECT ps FROM ParkingSession ps WHERE ps.spot.id = :spotId AND ps.status = :status")
     Optional<ParkingSession> findBySpotIdAndStatus(

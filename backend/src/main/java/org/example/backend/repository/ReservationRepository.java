@@ -13,6 +13,13 @@ import java.util.Optional;
 @Repository
 public interface ReservationRepository extends JpaRepository<Reservation, Long> {
 
+
+
+    @Query("SELECT r FROM Reservation r WHERE r.spot.id = :spotId AND r.status IN ('PENDING', 'CONFIRMED') AND :time BETWEEN r.startTime AND r.endTime")
+    List<Reservation> findPendingOrConfirmedReservationsForSpotAtTime(@Param("spotId") Long spotId, @Param("time") LocalDateTime time);
+
+    @Query("SELECT r FROM Reservation r WHERE r.driverId = :driverId AND r.spot.id = :spotId AND r.status = 'ACTIVE'")
+    Optional<Reservation> findActiveReservationForDriverAndSpot(@Param("driverId") String driverId, @Param("spotId") Long spotId);
     // Trouver les réservations actives ou en attente pour un spot
     @Query("SELECT r FROM Reservation r WHERE r.spot.id = :spotId AND r.status IN ('PENDING', 'ACTIVE') " +
             "AND ((r.startTime <= :currentTime AND r.endTime >= :currentTime) OR " +
@@ -22,6 +29,19 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
             @Param("currentTime") LocalDateTime currentTime,
             @Param("startTime") LocalDateTime startTime,
             @Param("endTime") LocalDateTime endTime);
+
+    @Query("""
+           SELECT r 
+           FROM Reservation r
+           WHERE r.spot.id = :spotId
+             AND r.status = 'CONFIRMED'
+             AND :time BETWEEN r.startTime AND r.endTime
+           ORDER BY r.startTime DESC
+           """)
+    List<Reservation> findConfirmedReservationsForSpotAtTime(
+            @Param("spotId") Long spotId,
+            @Param("time") LocalDateTime time
+    );
 
     // Trouver les réservations PENDING pour un spot à un moment donné (attente d'entrée physique)
     @Query("SELECT r FROM Reservation r WHERE r.spot.id = :spotId AND r.status = 'PENDING' " +
