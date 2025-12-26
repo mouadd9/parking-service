@@ -1,0 +1,20 @@
+:80 {
+    # Redirection vers l'API Backend (préserve le préfixe /api)
+    handle /api/* {
+        reverse_proxy backend:8080
+    }
+    
+handle /phpmyadmin* {
+    uri strip_prefix /phpmyadmin
+    reverse_proxy phpmyadmin:80
+}
+
+
+    # Redirection vers Node-RED (retire le préfixe /red)
+    handle_path /red/* {
+        reverse_proxy nodered:1880
+    }
+
+    # Redirection par défaut vers le Frontend
+    reverse_proxy frontend:3000
+}
