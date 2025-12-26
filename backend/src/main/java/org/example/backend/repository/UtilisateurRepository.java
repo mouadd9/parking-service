@@ -2,6 +2,7 @@ package org.example.backend.repository;
 
 import org.example.backend.entities.Utilisateur;
 import org.example.backend.enums.Role;
+import org.example.backend.enums.Role;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;
