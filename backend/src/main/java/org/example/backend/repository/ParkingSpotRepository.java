@@ -12,7 +12,7 @@ import java.util.Optional;
 @Repository
 public interface ParkingSpotRepository extends JpaRepository<ParkingSpot, Long> {
     List<ParkingSpot> findByZoneId(Long zoneId);
-
+    long countBySensorIdIsNotNull();
     Optional<ParkingSpot> findBySensorId(String sensorId);
 
     // Trouver les spots par zoneId

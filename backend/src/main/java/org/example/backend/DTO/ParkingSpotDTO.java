@@ -8,6 +8,9 @@ import lombok.Data;
 public class ParkingSpotDTO {
     private Long id;
     private String spotNumber; // Ex: "P-101"
-    private Boolean status;    // true = Libre, false = Occupé
+    private Boolean status;
+
+    private Long durationMinutes;
+    private Double totalCost;// true = Libre, false = Occupé
 
 }
