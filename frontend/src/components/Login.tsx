@@ -1,58 +1,77 @@
 import { useState } from "react";
 import { Mail, Lock, ParkingCircle } from "lucide-react";
-import { Header } from "../components/Header";
+
+import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
+
 
 export const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [rememberMeChecked, setRememberMeChecked] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 
+const navigate = useNavigate();
+
   const basePath = "";
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
+  e.preventDefault();
+  setLoading(true);
+  setError("");
 
-    try {
-      const response = await fetch("http://localhost:8080/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          password,
-          rememberMe: rememberMeChecked,
-        }),
-      });
+  try {
+    const response = await fetch("http://localhost:8080/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
 
-      const data = await response.json();
+    const data = await response.json();
 
-      if (!response.ok) {
-        setSuccess(false);
-        setError(data.message || "⚠️ Identifiants invalides");
-        setLoading(false);
-        return;
-      }
-
-      // Login réussi
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("role", data.role);
-      setSuccess(true);
-    } catch (err) {
-      console.error(err);
-      setError("⚠️ Erreur serveur, veuillez réessayer plus tard.");
-    } finally {
-      setLoading(false);
+    if (!response.ok) {
+      setError(data.message || "⚠️ Identifiants invalides");
+      return;
     }
-  };
+
+    // ✅ Login réussi
+    localStorage.setItem("id",data.id);
+    localStorage.setItem("token", data.token);
+    localStorage.setItem("role", data.role);
+    localStorage.setItem("user", data.nom);
+    if(data.role==="ADMINISTRATEUR"){
+    navigate("/admin");
+    }else if(data.role==="CONDUCTEUR"){
+      navigate("/");
+    } 
+  } catch (err) {
+    console.error(err);
+    setError("⚠️ Erreur serveur, veuillez réessayer plus tard.");
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   return (
     <div className="min-h-screen mt-12 bg-slate-50">
-      <Header  />
+ <header className="fixed top-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-sm border-b border-slate-200">
+      <div className="flex items-center justify-center h-16 px-6">
+        <Link
+          to="/"
+          className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+        >
+          <div className="bg-sky-600 text-white p-2 rounded-lg shadow">
+            <ParkingCircle className="h-6 w-6" />
+          </div>
 
+          <span className="text-xl font-bold text-slate-800">
+            Parking Manager
+          </span>
+        </Link>
+      </div>
+    </header>
       <div className="flex items-center justify-center px-4 py-12">
         <div className="bg-white/95 backdrop-blur-md shadow-2xl rounded-2xl p-8 w-full max-w-md border border-slate-200">
           <div className="flex flex-col items-center mb-6">

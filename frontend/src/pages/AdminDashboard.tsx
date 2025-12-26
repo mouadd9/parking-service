@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import {Header_admin} from '../components/Header_admin';
 
 interface Statistics {
   users: {
@@ -294,6 +295,7 @@ const AdminDashboard = () => {
   if (error && !statistics) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
+        
         <Card className="w-full max-w-md">
           <CardHeader>
             <CardTitle className="text-destructive">Error</CardTitle>
@@ -322,6 +324,8 @@ const AdminDashboard = () => {
 
   return (
     <div className="min-h-screen bg-background">
+                <Header_admin />
+
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <div className="mb-8">
