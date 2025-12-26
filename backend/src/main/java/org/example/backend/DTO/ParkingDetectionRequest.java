@@ -1,4 +1,10 @@
 package org.example.backend.DTO;
 
-public class ParkingResponseDTO {
+import lombok.Data;
+
+@Data
+public class ParkingDetectionRequest {
+    private String sensorId;
+    private String status; // "occupied" ou "free"
+    private String timestamp;
 }
