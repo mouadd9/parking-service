@@ -23,7 +23,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                         "http://localhost:3000",
                         "http://localhost:5173",
                         "http://127.0.0.1:3000",
-                        "http://127.0.0.1:5173"
+                        "http://127.0.0.1:5173",
+                        "http://localhost",       // ✅ Fix for Docker/Caddy
+                        "http://127.0.0.1"        // ✅ Fix for Docker/Caddy
                 )
                 .withSockJS();
     }

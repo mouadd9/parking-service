@@ -33,7 +33,7 @@ public class Reservation {
     @Column(name = "end_time", nullable = false)
     private LocalDateTime endTime;
 
-    @Column(name = "status")
+    @Column(name = "status", length = 50)
     private String status; // PENDING, CONFIRMED, CANCELLED, ACTIVE, COMPLETED
 
     @CreationTimestamp

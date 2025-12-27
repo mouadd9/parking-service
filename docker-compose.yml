@@ -16,6 +16,12 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
       # - ./data.sql:/app/init-data/data.sql
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      retries: 5
 
   backend:
     container_name: smart-parking-service
@@ -31,6 +37,8 @@ services:
       mysql:
         condition: service_healthy
     restart: unless-stopped
+    ports:
+      - "8080:8080"
     networks:
       - internal
       - web

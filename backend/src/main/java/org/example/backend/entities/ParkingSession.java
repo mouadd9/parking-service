@@ -37,5 +37,6 @@ public class ParkingSession {
 
 
     @Enumerated(EnumType.STRING)
+    @Column(length = 50)
     private SessionStatus status;
 }
