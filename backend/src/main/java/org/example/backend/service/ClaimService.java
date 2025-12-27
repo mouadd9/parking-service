@@ -33,6 +33,10 @@ public class ClaimService {
     private final ClaimAttachmentRepository attachmentRepository;
     private final ObjectMapper objectMapper;
 
+    public List<Claim> getAllClaims() {
+        return claimRepository.findAll();
+    }
+
     @Transactional
 public Claim processClaimCreated(ClaimCreatedDto dto) {
     log.info("=== STARTING processClaimCreated ===");

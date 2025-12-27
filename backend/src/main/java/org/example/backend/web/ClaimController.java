@@ -32,6 +32,15 @@ public class ClaimController {
     // Will be used in the frontend to fetch claim in the operator dashboard
 
     /**
+     * Get all claims
+     * GET /api/claims
+     */
+    @GetMapping
+    public ResponseEntity<List<Claim>> getAllClaims() {
+        return ResponseEntity.ok(claimService.getAllClaims());
+    }
+
+    /**
      * Get claim by UUID
      * GET /api/claims/{claimUuid}
      */

@@ -1,0 +1,28 @@
+{
+    "messageId": "msg-test-01",
+    "messageType": "CLAIM_CREATED",
+    "timestamp": "2024-01-01T12:00:00Z",
+    "version": "1.0",
+    "claimId": "claim-uuid-test-01",
+    "claimNumber": "REC-TEST-001",
+    "correlationId": "corr-001",
+    "user": {
+        "id": "user-test-1",
+        "email": "tester@example.com",
+        "name": "Tester Manual",
+        "phone": "0612345678"
+    },
+    "claim": {
+        "serviceType": "PARKING",
+        "title": "Manual Test Claim",
+        "description": "This is a manually injected claim to test the dashboard.",
+        "priority": "HIGH",
+        "location": {
+            "address": "Test Location",
+            "latitude": 35.0,
+            "longitude": -5.0
+        },
+        "attachments": [],
+        "extraData": {}
+    }
+}

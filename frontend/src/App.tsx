@@ -10,6 +10,8 @@ import NotFound from "./pages/NotFound";
 import { Login } from "./components/Login";
 
 
+import Reclamations from "./pages/Reclamations";
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -21,7 +23,10 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/login" element={<Login />} />
-           <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/admin/dashboard" element={<AdminDashboard />} />
+          <Route path="/admin/rates" element={<AdminDashboard />} />
+          <Route path="/admin/reclamations" element={<Reclamations />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

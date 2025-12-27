@@ -14,6 +14,7 @@ public interface ParkingSpotRepository extends JpaRepository<ParkingSpot, Long> 
     List<ParkingSpot> findByZoneId(Long zoneId);
     long countBySensorIdIsNotNull();
     Optional<ParkingSpot> findBySensorId(String sensorId);
+    long countByZoneId(Long zoneId);
 
 
     // Compter les spots par zone et statut
