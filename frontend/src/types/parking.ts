@@ -13,6 +13,7 @@ export interface ParkingSpot {
   spotNumber: string;
   status: 'free' | 'occupied' | 'booked';
   zoneId: string;
+  sensorId?: string;
 }
 
 export interface ParkingSession {

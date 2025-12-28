@@ -135,4 +135,28 @@ export const parkingApi = {
   async cancelReservation(reservationId: number): Promise<void> {
     await apiFetch<void>(`/reservations/${reservationId}/cancel`, { method: 'POST' });
   },
+
+  // Simulate sensor entry
+  async detectEntry(sensorId: string): Promise<void> {
+    await apiFetch<void>(`/parking/detect`, {
+      method: 'POST',
+      body: JSON.stringify({
+        sensorId,
+        status: 'occupied',
+        timestamp: new Date().toISOString()
+      })
+    });
+  },
+
+  // Simulate sensor exit
+  async detectExit(sensorId: string): Promise<void> {
+    await apiFetch<void>(`/parking/detect`, {
+      method: 'POST',
+      body: JSON.stringify({
+        sensorId,
+        status: 'free',
+        timestamp: new Date().toISOString()
+      })
+    });
+  }
 };

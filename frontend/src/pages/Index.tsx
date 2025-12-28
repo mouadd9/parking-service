@@ -6,6 +6,8 @@ import MapTypeToggle from "@/components/parking/MapTypeToggle";
 import ActiveSessionBanner from "@/components/parking/ActiveSessionBanner";
 import ParkingModal from "@/components/parking/ParkingModal";
 import PaymentSummaryModal from "@/components/parking/PaymentSummaryModal";
+import WaitingToEnterPopup from "@/components/parking/WaitingToEnterPopup";
+import ActiveParkingPopup from "@/components/parking/ActiveParkingPopup";
 import SearchInput from "@/components/parking/SearchInput";
 import NavigationTabs from "@/components/parking/NavigationTabs";
 import SessionHistoryList from "@/components/parking/SessionHistoryList";
@@ -63,6 +65,14 @@ const Index = () => {
   const [isBooking, setIsBooking] = useState(false);
   const [loadingSpots, setLoadingSpots] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
+
+  const [isSimulatingArrival, setIsSimulatingArrival] = useState(false);
+  const [arrivalCountdown, setArrivalCountdown] = useState(0);
+  const [pendingSpot, setPendingSpot] = useState<ParkingSpot | null>(null); // Store spot for delayed reservation
+  const [showWaitingPopup, setShowWaitingPopup] = useState(false);
+  const [showActivePopup, setShowActivePopup] = useState(false);
+  // Timer for the auto-exit (~1 minute)
+  const [autoExitTimer, setAutoExitTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
 
   const stompClientRef = useRef<Client | null>(null);
   const { toast } = useToast();
@@ -240,7 +250,7 @@ const Index = () => {
 
     // Vérifier si l'événement correspond à notre session
     if (activeSession.status === "reserved" &&
-        eventReservationId === sessionReservationId) {
+      eventReservationId === sessionReservationId) {
 
       console.log("✅ MATCH! Starting timer...");
 
@@ -262,17 +272,7 @@ const Index = () => {
       setActiveSession(updatedSession);
 
       // Optionnel: confirmer avec le backend
-      if (activeSession.reservationId) {
-        try {
-          await parkingApi.confirmReservationEntry(
-            activeSession.reservationId,
-            event.driverId || "UNKNOWN"
-          );
-          console.log("✅ Entry confirmed with backend");
-        } catch (error) {
-          console.error("⚠️ Error confirming entry with backend:", error);
-        }
-      }
+      // Optionnel: confirmer avec le backend (Supprimé car géré par WebSocket et simulation)
 
       // Afficher la notification
       toast({
@@ -316,8 +316,8 @@ const Index = () => {
 
     // Vérifier si c'est pour notre session
     if (activeSession &&
-        activeSession.status === "active" &&
-        Number(event.reservationId) === Number(activeSession.reservationId)) {
+      activeSession.status === "active" &&
+      Number(event.reservationId) === Number(activeSession.reservationId)) {
 
       // Compléter la session
       const completed: ParkingSession = {
@@ -403,6 +403,15 @@ const Index = () => {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [activeSession, handleEntryDetected, handleExitDetected]);
 
+  // Cleanup auto-exit timer on unmount
+  useEffect(() => {
+    return () => {
+      if (autoExitTimer) {
+        clearTimeout(autoExitTimer);
+      }
+    };
+  }, [autoExitTimer]);
+
   // ========================================================================
   // FONCTIONS EXISTANTES
   // ========================================================================
@@ -440,6 +449,7 @@ const Index = () => {
           spotNumber: spot.spotNumber,
           status: spot.status ? "free" : "occupied",
           zoneId: String(spot.zone.id),
+          sensorId: spot.sensorId,
         }));
 
         setSpotsCache((prev) => ({ ...prev, [parking.id]: frontendSpots }));
@@ -466,16 +476,36 @@ const Index = () => {
   const handleBookSpot = async (spot: ParkingSpot, hourlyRate: number) => {
     if (!selectedParking) return;
 
+    // Store the spot and show waiting popup
+    setPendingSpot(spot);
+    setCurrentSessionRate(hourlyRate);
     setIsBooking(true);
+    
+    // Close the spot selection modal
+    setIsModalOpen(false);
+
+    // Show waiting popup (10-15 seconds)
+    setShowWaitingPopup(true);
+  };
+
+  // Called when waiting popup completes (after 10-15 seconds)
+  const handleWaitingComplete = async () => {
+    setShowWaitingPopup(false);
+
+    if (!pendingSpot || !selectedParking) {
+      setIsBooking(false);
+      return;
+    }
 
     try {
-      const now = new Date();
-      const endTime = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+      console.log("🚀 Waiting complete. Creating Reservation + Detecting Entry.");
 
-      console.log("📝 Creating reservation...");
+      // 1. CREATE RESERVATION
+      const now = new Date();
+      const endTime = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours max
 
       const reservation = await parkingApi.createReservation({
-        spotId: Number(spot.id),
+        spotId: Number(pendingSpot.id),
         driverId: MOCK_USER_ID,
         startTime: now.toISOString(),
         endTime: endTime.toISOString(),
@@ -483,61 +513,62 @@ const Index = () => {
 
       console.log("✅ Reservation created:", reservation);
 
-      // IMPORTANT: Convertir reservation.id en string pour la cohérence
-      const newSession: ParkingSession = {
+      // 2. TRIGGER ENTRY DETECTION (Backend will create ACTIVE session)
+      if (pendingSpot.sensorId) {
+        await parkingApi.detectEntry(pendingSpot.sensorId);
+      }
+
+      // 3. Create ACTIVE session locally (backend should have created it, but we sync locally)
+      const activeSession: ParkingSession = {
         id: `session-${Date.now()}`,
         zoneId: selectedParking.id,
         zoneName: selectedParking.properties.name,
-        spotNumber: spot.spotNumber,
-        spotId: reservation.spotId.toString(),
-        reservationId: reservation.id.toString(), // 🔥 Convertir en string
-        status: "reserved" as const,
+        spotNumber: pendingSpot.spotNumber,
+        spotId: reservation.spotId,
+        reservationId: reservation.id,
+        startTime: now, // Timer starts now
+        status: "active" as const,
       };
 
-      console.log("📱 New session created:", newSession);
+      setActiveSession(activeSession);
 
-      setActiveSession(newSession);
-      setCurrentSessionRate(hourlyRate);
-
+      // Update Map Spot
       setSpotsCache((prev) => ({
         ...prev,
         [selectedParking.id]:
           prev[selectedParking.id]?.map((s) =>
-            s.id === spot.id ? { ...s, status: "booked" as const } : s
+            s.id === pendingSpot.id ? { ...s, status: "occupied" as const } : s
           ) || [],
       }));
 
-      handleCloseModal();
+      // 4. Show active parking popup with count-up timer
+      setShowActivePopup(true);
+
+      // 5. SCHEDULE AUTO-EXIT (~1 minute = 60 seconds)
+      scheduleAutoExit(pendingSpot.sensorId || "mock-sensor");
 
       toast({
-        title: "✅ Spot Réservé",
-        description: `Spot ${spot.spotNumber} - Roulez jusqu'au parking. Le timer démarrera automatiquement à l'entrée.`,
-        duration: 7000,
+        title: "✅ Session started",
+        description: `Parking session active for spot ${pendingSpot.spotNumber}`,
+        duration: 3000,
       });
-
-      // Auto-annulation après 10 minutes
-      setTimeout(() => {
-        if (activeSession?.reservationId === reservation.id.toString() &&
-            activeSession.status === "reserved") {
-          handleAutoCancelReservation(reservation.id.toString(), spot.id);
-        }
-      }, 10 * 60 * 1000);
 
     } catch (e) {
-      console.error("Failed to create reservation:", e);
+      console.error("Failed to start parking session:", e);
       toast({
-        title: "❌ Échec de réservation",
-        description: e instanceof Error ? e.message : "Impossible de réserver le spot. Veuillez réessayer.",
-        variant: "destructive",
+        title: "❌ Error",
+        description: "Failed to start parking session. Please try again.",
+        variant: "destructive"
       });
-    } finally {
       setIsBooking(false);
+      setPendingSpot(null);
     }
   };
 
-  const handleAutoCancelReservation = async (reservationId: string, spotId: string) => {
+  const handleAutoCancelReservation = async (reservationId: number, spotId: string) => {
     try {
-      if (activeSession?.status === "reserved" && activeSession.reservationId === reservationId) {
+      if (activeSession?.reservationId === reservationId &&
+        activeSession.status === "reserved") {
         await parkingApi.cancelReservation(reservationId);
 
         setSpotsCache((prev) => ({
@@ -557,6 +588,67 @@ const Index = () => {
     } catch (error) {
       console.error("Failed to auto-cancel reservation:", error);
     }
+  };
+
+  const scheduleAutoExit = (sensorId: string) => {
+    console.log("⏳ SIMULATION: Scheduling auto-exit in ~1 minute...");
+
+    if (autoExitTimer) clearTimeout(autoExitTimer);
+
+    // Auto-exit after ~1 minute (60 seconds)
+    const exitDuration = 60000; // 60 seconds = 1 minute
+    console.log(`⏳ SIMULATION: Auto-exit scheduled in ${exitDuration / 1000}s`);
+
+    const timer = setTimeout(async () => {
+      console.log("👋 SIMULATION: Triggering Auto-Exit...");
+
+      // Close active popup
+      setShowActivePopup(false);
+
+      // Calculate final cost
+      if (activeSession && activeSession.startTime) {
+        const endTime = new Date();
+        const durationMs = endTime.getTime() - activeSession.startTime.getTime();
+        const hours = Math.max(durationMs / (1000 * 60 * 60), 0.05); // Minimum 3 minutes
+        const cost = hours * currentSessionRate;
+
+        const completed: ParkingSession = {
+          ...activeSession,
+          endTime: endTime,
+          totalCost: cost,
+          status: "completed" as const,
+        };
+
+        setCompletedSession(completed);
+        setActiveSession(null);
+
+        // Free the spot locally
+        setSpotsCache((prev) => ({
+          ...prev,
+          [activeSession.zoneId]:
+            prev[activeSession.zoneId]?.map((s) =>
+              s.spotNumber === activeSession.spotNumber ? { ...s, status: "free" as const } : s
+            ) || [],
+        }));
+
+        toast({
+          title: "✅ Session completed",
+          description: `Duration: ${Math.floor(durationMs / 1000)}s. Cost: ${cost.toFixed(2)}€`,
+          duration: 5000,
+        });
+      }
+
+      // Call Backend to detect exit
+      if (sensorId !== "mock-sensor") {
+        parkingApi.detectExit(sensorId).catch(console.error);
+      }
+
+      setIsBooking(false);
+      setPendingSpot(null);
+
+    }, exitDuration);
+
+    setAutoExitTimer(timer);
   };
 
   const handleCancelReservation = async () => {
@@ -613,11 +705,10 @@ const Index = () => {
 
       {/* Indicateur de connexion WebSocket */}
       <div className="absolute top-20 right-4 z-50">
-        <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs shadow-lg ${
-          wsConnected
-            ? "bg-green-500/20 text-green-700 border border-green-500/30"
-            : "bg-red-500/20 text-red-700 border border-red-500/30"
-        }`}>
+        <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs shadow-lg ${wsConnected
+          ? "bg-green-500/20 text-green-700 border border-green-500/30"
+          : "bg-red-500/20 text-red-700 border border-red-500/30"
+          }`}>
           <div className={`w-2 h-2 rounded-full ${wsConnected ? "bg-green-500 animate-pulse" : "bg-red-500"}`} />
           {wsConnected ? "Connecté" : "Déconnecté"}
         </div>
@@ -659,11 +750,6 @@ const Index = () => {
               <ActiveSessionBanner
                 session={activeSession}
                 hourlyRate={currentSessionRate}
-                onCancelReservation={
-                  activeSession.status === "reserved"
-                    ? handleCancelReservation
-                    : undefined
-                }
               />
             </div>
           </MapOverlay>
@@ -683,6 +769,26 @@ const Index = () => {
           hasActiveSession={!!activeSession}
           isBooking={isBooking || loadingSpots}
         />
+
+        {/* Waiting to Enter Popup */}
+        {showWaitingPopup && pendingSpot && selectedParking && (
+          <WaitingToEnterPopup
+            isOpen={showWaitingPopup}
+            spotNumber={pendingSpot.spotNumber}
+            zoneName={selectedParking.properties.name}
+            onComplete={handleWaitingComplete}
+          />
+        )}
+
+        {/* Active Parking Popup with Count-up Timer */}
+        {showActivePopup && activeSession && (
+          <ActiveParkingPopup
+            isOpen={showActivePopup}
+            session={activeSession}
+            hourlyRate={currentSessionRate}
+            onClose={() => setShowActivePopup(false)}
+          />
+        )}
 
         {completedSession && (
           <PaymentSummaryModal

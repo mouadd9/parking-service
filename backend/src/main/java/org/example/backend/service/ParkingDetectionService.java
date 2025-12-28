@@ -149,16 +149,31 @@ public class ParkingDetectionService {
             log.info("📡 WebSocket notification sent for reservation {}", reservation.getId());
         }
 
-        // 5) Créer session
-        ParkingSession session = ParkingSession.builder()
-                .spot(spot)
-                .driverId(driverId)
-                .startTime(detectionTime)
-                .status(SessionStatus.ACTIVE)
-                .totalCost(BigDecimal.ZERO)
-                .build();
+        // 5) Update existing PENDING session to ACTIVE, or create new ACTIVE session
+        ParkingSession savedSession;
+        Optional<ParkingSession> existingPendingSession = sessionRepository
+                .findBySpotIdAndStatus(spot.getId(), SessionStatus.PENDING);
 
-        ParkingSession savedSession = sessionRepository.save(session);
+        if (existingPendingSession.isPresent()) {
+            // Update existing PENDING session to ACTIVE
+            ParkingSession pendingSession = existingPendingSession.get();
+            pendingSession.setStatus(SessionStatus.ACTIVE);
+            pendingSession.setStartTime(detectionTime);
+            pendingSession.setDriverId(driverId); // Update driverId in case it was anonymous
+            savedSession = sessionRepository.save(pendingSession);
+            log.info("✅ Updated PENDING session {} to ACTIVE", savedSession.getId());
+        } else {
+            // Create new ACTIVE session (for cases without reservation)
+            ParkingSession session = ParkingSession.builder()
+                    .spot(spot)
+                    .driverId(driverId)
+                    .startTime(detectionTime)
+                    .status(SessionStatus.ACTIVE)
+                    .totalCost(BigDecimal.ZERO)
+                    .build();
+            savedSession = sessionRepository.save(session);
+            log.info("✅ Created new ACTIVE session {}", savedSession.getId());
+        }
         sessionRepository.flush();
 
         // 6) Mettre spot OCCUPÉ
